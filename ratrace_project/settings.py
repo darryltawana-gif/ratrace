@@ -144,7 +144,6 @@ MAILERS = {
     },
 }
 
-
 # ---------- Production settings (only active on Render) ----------
 import os
 import dj_database_url
@@ -172,6 +171,19 @@ if "RENDER" in os.environ:
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
         "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
     }
-    if os.environ.get("CLOUDINARY_URL"):
-        INSTALLED_APPS += ["cloudinary_storage", "cloudinary"]
-        STORAGES["default"] = {"BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage"}
+
+    # Supabase Storage for uploaded photos
+    if os.environ.get("SUPABASE_BUCKET"):
+        _ref = os.environ["SUPABASE_PROJECT_REF"]
+        _bucket = os.environ["SUPABASE_BUCKET"]
+        STORAGES["default"] = {"BACKEND": "storages.backends.s3.S3Storage"}
+        AWS_ACCESS_KEY_ID = os.environ["SUPABASE_ACCESS_KEY"]
+        AWS_SECRET_ACCESS_KEY = os.environ["SUPABASE_SECRET_KEY"]
+        AWS_STORAGE_BUCKET_NAME = _bucket
+        AWS_S3_ENDPOINT_URL = f"https://{_ref}.storage.supabase.co/storage/v1/s3"
+        AWS_S3_REGION_NAME = os.environ["SUPABASE_REGION"]
+        AWS_S3_ADDRESSING_STYLE = "path"
+        AWS_S3_CUSTOM_DOMAIN = f"{_ref}.supabase.co/storage/v1/object/public/{_bucket}"
+        AWS_QUERYSTRING_AUTH = False
+        AWS_S3_FILE_OVERWRITE = False
+        AWS_DEFAULT_ACL = None
