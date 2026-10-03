@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+ .track{position:relative;height:56px;background:repeating-linear-gradient(90deg,#3b332b 0 40px,#332c25 40px 80px);border-radius:10px;overflow:hidden}
+ .runner{position:absolute;top:2px;font-size:2.6rem;transition:left .6s ease;text-align:center;line-height:1}
+ .runner small{display:block;font-size:.65rem;background:#000a;border-radius:4px;padding:0 4px}
+ .finish{position:absolute;right:6px;top:8px;font-size:2rem}
+ .pimg{width:100%;max-height:340px;object-fit:contain;background:#000;border-radius:10px;cursor:zoom-in}
+ .ctrl{display:flex;align-items:center;gap:10px;margin:6px 0} .ctrl b{min-width:130px}
+ #over{display:none;position:fixed;inset:0;background:#000d;z-index:100;text-align:center;padding-top:20vh}
+ #over h1{font-size:3rem}
+</style>
+
+<div class="card">
+  <h2>🏁 {{ race.product }} <small>(budget {{ race.budget }})</small></h2>
+  <p>Started at <b id="start"></b> | <span id="cd"></span> | Spots left: <b id="slots"></b>/10</p>
+  {% if is_owner and race.is_live %}
+  <form method="post" action="{% url 'customer_exit' race.id %}">{% csrf_token %}<button class="btn red">Exit race</button></form>
+  {% endif %}
+  {% if mine %}
+  <form method="post" action="{% url 'seller_leave' race.id %}">{% csrf_token %}<button class="btn red">Exit race</button></form>
+  {% endif %}
+</div>
+
+{% if form %}
+<div class="card">
+  <h3>Join this race</h3>
+  <p>The earlier you join, the faster your animal (Cheetah first, Tortoise last).</p>
+  <form method="post" enctype="multipart/form-data">{% csrf_token %}{{ form.as_p }}<button class="btn green">Enter Race</button></form>
+</div>
+{% endif %}
+
+<div id="lanes"></div>
+<div id="over"><h1>🏁 GAME OVER</h1><p id="overmsg" style="font-size:1.4rem"></p><a class="btn" href="/">Back home</a></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const RACE_ID = Number("{{ race.id }}"), IS_OWNER = "{{ is_owner|yesno:'true,false' }}" === "true", CSRF = "{{ csrf_token }}", ME = Number("{{ request.user.id }}");
+let expires = null, live = true;
+const lanes = document.getElementById('lanes');
+
+function render(s){
+  const r = s.race; expires = new Date(r.expires_at);
+  document.getElementById('start').textContent = new Date(r.started_at).toLocaleTimeString();
+  document.getElementById('slots').textContent = r.slots_left;
+  lanes.innerHTML = s.participants.map(p => {
+    const mine = p.seller_id === ME;
+    return `<div class="card">
+      <div style="display:flex;gap:10px;align-items:center">
+        ${p.photo ? `<img src="${p.photo}" style="width:44px;height:44px;border-radius:50%;object-fit:cover">` : ''}
+        <b>#${p.slot} ${p.animal} ${p.emoji}: ${p.name}</b>
+      </div>
+      <div class="track"><div class="runner" style="left:${p.progress*0.88}%">${p.emoji}<small>${p.name}</small></div><div class="finish">🏁</div></div>
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;margin-top:10px">
+        <a href="${p.image}" target="_blank"><img class="pimg" src="${p.image}"></a>
+        <div><h3 style="margin:0">${p.product}</h3><h2 style="margin:4px 0">${p.price}</h2><p>${p.details}</p>
+          <p>💸 Discount: <b>${p.discount}%</b><br>🚚 Free delivery: <b>${p.delivery?'Yes':'No'}</b><br>
+          🎁 Promo: <b>${p.promo? 'Buy 1 get '+p.promo+' free':'None'}</b></p>
+          ${IS_OWNER && live ? `<form method="post" action="/race/${RACE_ID}/winner/${p.id}/"><input type="hidden" name="csrfmiddlewaretoken" value="${CSRF}"><button class="btn green">🏆 Choose as winner</button></form>` : ''}
+        </div>
+      </div>
+      ${mine && live ? `
+        <hr>
+        <div class="ctrl"><b>Discount</b><button class="btn small" onclick="adj('discount',-1)">−</button><span>${p.discount}%</span><button class="btn small" onclick="adj('discount',1)">+</button></div>
+        <div class="ctrl"><b>Free delivery</b><button class="btn small" onclick="adj('delivery',-1)">−</button><span>${p.delivery?'ON':'OFF'}</span><button class="btn small" onclick="adj('delivery',1)">+</button></div>
+        <div class="ctrl"><b>Promotion</b><button class="btn small" onclick="adj('promo',-1)">−</button><span>${p.promo? 'Buy 1 get '+p.promo+' free':'None'}</span><button class="btn small" onclick="adj('promo',1)">+</button></div>` : ''}
+    </div>`;
+  }).join('') || '<p>No sellers in the race yet. Waiting for sellers…</p>';
+}
+
+(function connect(){
+  const ws = new WebSocket(`${wsScheme}://${location.host}/ws/race/${RACE_ID}/`);
+  window.adj = (field, dir) => ws.send(JSON.stringify({action:'adjust', field, dir}));
+  ws.onmessage = e => {
+    const d = JSON.parse(e.data);
+    if (d.type === 'state') render(d.state);
+    else if (d.type === 'event') { toast(d.message); beep(); notify('The Rat Race', d.message, location.href); }
+    else if (d.type === 'race_over') {
+      live = false; document.getElementById('overmsg').textContent = d.message;
+      document.getElementById('over').style.display = 'block'; notify('Race over', d.message, '/');
+    }
+  };
+  ws.onclose = () => { if (live) setTimeout(connect, 2000); };
+})();
+
+setInterval(()=>{ if(!expires) return; const s=Math.max(0,Math.floor((expires-Date.now())/1000));
+  document.getElementById('cd').textContent = `⏱ ${Math.floor(s/60)}:${String(s%60).padStart(2,'0')} left`; }, 1000);
+</script>
+{% endblock %}

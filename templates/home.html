@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+ .hero{text-align:center;perspective:800px}
+ .rat3d{font-size:9rem;display:inline-block;animation:spin 6s linear infinite;filter:drop-shadow(0 22px 12px rgba(0,0,0,.6))}
+ @keyframes spin{from{transform:rotateY(0)}to{transform:rotateY(360deg)}}
+ .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}
+ .animal{text-align:center} .animal .e{font-size:3.4rem;display:inline-block;animation:float 3s ease-in-out infinite;perspective:600px}
+ @keyframes float{0%,100%{transform:translateY(0) rotateY(-15deg)}50%{transform:translateY(-8px) rotateY(15deg)}}
+ .tip{border:2px solid var(--accent)}
+ .avatar{width:64px;height:64px;border-radius:50%;object-fit:cover}
+</style>
+
+<div class="hero">
+  <div class="rat3d">🐀</div>
+  <h1>The Rat Race</h1>
+  <p>Sellers race to win the customer. Fastest and best offer wins!</p>
+  <a class="btn" style="font-size:1.3rem" href="{% url 'start' %}">Customer: Start Race</a>
+</div>
+
+<h2>🔴 Live races</h2>
+<div id="live"><p>Loading…</p></div>
+
+<div class="card tip">
+  <h3>🔔 Crucial tip: never miss a race</h3>
+  <ol>
+    <li>Tap <b>Allow</b> when the browser asks about notifications.</li>
+    <li>On your phone, <b>install the site</b>: Chrome menu ⋮ → <i>Add to Home screen</i> (iPhone: Safari Share → <i>Add to Home Screen</i>).</li>
+    <li>Keep the site open in a tab (don't swipe it away) while you use other apps, and turn off battery saver for your browser.</li>
+    <li>Make sure the browser's notifications are enabled in your phone Settings.</li>
+  </ol>
+</div>
+
+<h2>🏁 The animal ranking</h2>
+<div class="grid">
+  {% for a in animals %}
+  <div class="card animal"><div class="e">{{ a.emoji }}</div><br><b>#{{ a.rank }} {{ a.name }}</b><br><small>{{ a.text }}</small></div>
+  {% endfor %}
+</div>
+
+<h2>🏆 Recent winners</h2>
+<div class="grid">
+  {% for r in winners %}
+  <div class="card animal">
+    {% if r.winner.seller.profile.photo %}<img class="avatar" src="{{ r.winner.seller.profile.photo.url }}">{% endif %}
+    <br><b>{{ r.winner.display_name }}</b><br><small>won “{{ r.product }}”</small>
+  </div>
+  {% empty %}<p>No winners yet.</p>{% endfor %}
+</div>
+
+<h2>👑 Hall of Fame (5+ wins)</h2>
+<div class="grid">
+  {% for p in hall %}
+  <div class="card animal">
+    {% if p.photo %}<img class="avatar" src="{{ p.photo.url }}">{% else %}<div class="e">👤</div>{% endif %}
+    <br><b>{{ p.user.username }}</b><br>🏆 {{ p.wins }} wins
+  </div>
+  {% empty %}<p>No one has 5 wins yet.</p>{% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function refreshLive(){
+  const r = await fetch('/api/live-races/'); const d = await r.json();
+  const box = document.getElementById('live');
+  if(!d.races.length){ box.innerHTML='<p>No live races right now.</p>'; return; }
+  box.innerHTML = d.races.map(x => `
+    <div class="card">
+      <span class="dot"></span><b>${x.product}</b> | Budget: ${x.budget}<br>
+      Started: ${new Date(x.started_at).toLocaleTimeString()} | Spots left: ${x.slots_left}/10 |
+      <span class="cd" data-end="${x.expires_at}"></span><br><br>
+      ${ROLE !== 'customer' ? `<a class="btn green" href="/race/${x.id}/">Enter Race</a>` : ''}
+    </div>`).join('');
+}
+setInterval(()=>{ document.querySelectorAll('.cd').forEach(el=>{
+  const s=Math.max(0,Math.floor((new Date(el.dataset.end)-Date.now())/1000));
+  el.textContent=`⏱ ${Math.floor(s/60)}:${String(s%60).padStart(2,'0')} left`; if(s===0) refreshLive(); });},1000);
+document.addEventListener('lobby', refreshLive);
+refreshLive(); setInterval(refreshLive, 20000);
+</script>
+{% endblock %}

@@ -1,0 +1,10 @@
+django
+channels
+channels-redis
+daphne
+pillow
+whitenoise
+dj-database-url
+psycopg2-binary
+cloudinary
+django-cloudinary-storage

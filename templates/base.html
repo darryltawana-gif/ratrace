@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}The Rat Race{% endblock %}</title>
+<link rel="manifest" href="/manifest.json">
+<style>
+ :root{--bg:#14110f;--card:#221d19;--text:#f5efe6;--accent:#f4a63a;--green:#2ecc71;--red:#e74c3c}
+ *{box-sizing:border-box} body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--text)}
+ a{color:var(--accent)} nav{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px 16px;background:#000}
+ nav .brand{font-weight:800;font-size:1.3rem;color:var(--accent);text-decoration:none;margin-right:auto}
+ main{max-width:1000px;margin:0 auto;padding:16px}
+ .btn{display:inline-block;background:var(--accent);color:#000;border:0;border-radius:10px;padding:10px 18px;font-weight:700;cursor:pointer;text-decoration:none;font-size:1rem}
+ .btn.green{background:var(--green);animation:pulse 1s infinite} .btn.red{background:var(--red);color:#fff} .btn.small{padding:5px 12px}
+ .card{background:var(--card);border-radius:14px;padding:16px;margin:12px 0}
+ input,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid #555;background:#111;color:#fff}
+ .msg{padding:10px 14px;border-radius:8px;margin:8px 0;background:#333} .msg.error{background:#7a2b2b} .msg.success{background:#1f5c36}
+ .dot{display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--green);animation:beep 1s infinite;margin-right:6px}
+ @keyframes beep{0%,100%{opacity:1;transform:scale(1);box-shadow:0 0 0 0 rgba(46,204,113,.8)}50%{opacity:.5;transform:scale(1.3);box-shadow:0 0 0 10px rgba(46,204,113,0)}}
+ @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+ #toasts{position:fixed;top:10px;right:10px;left:10px;max-width:420px;margin-left:auto;z-index:99}
+ .toast{background:#0d3b22;border:2px solid var(--green);padding:12px;border-radius:10px;margin-bottom:8px;box-shadow:0 4px 14px #000}
+ #notifbar{background:#3a2a00;padding:10px 16px;display:none} 
+</style>
+</head>
+<body>
+<nav>
+  <a class="brand" href="/">🐀 The Rat Race</a>
+  <a href="{% url 'comments' %}">Comments</a>
+  {% if user.is_authenticated %}
+    {% if role == 'none' %}
+      <form method="post" action="{% url 'set_role' 'seller' %}">{% csrf_token %}<button class="btn small">I'm a Seller</button></form>
+      <form method="post" action="{% url 'set_role' 'customer' %}">{% csrf_token %}<button class="btn small">I'm a Customer</button></form>
+    {% else %}
+      {% if role == 'seller' %}<a href="{% url 'profile' %}">My profile photo</a>{% endif %}
+      <form method="post" action="{% url 'set_role' 'none' %}">{% csrf_token %}<button class="btn small red">Cancel {{ role }} mode</button></form>
+    {% endif %}
+    <span>👤 {{ user.username }}</span>
+    <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn small">Logout</button></form>
+  {% else %}
+    <a href="{% url 'login' %}">Login</a> <a href="{% url 'signup' %}">Sign up</a>
+  {% endif %}
+</nav>
+<div id="notifbar">🔔 Get alerted when a customer starts a race.
+  <button class="btn small" id="notifbtn">Enable notifications</button></div>
+<div id="toasts"></div>
+<main>
+  {% for m in messages %}<div class="msg {{ m.tags }}">{{ m }}</div>{% endfor %}
+  {% block content %}{% endblock %}
+</main>
+
+<script>
+const ROLE = "{{ role }}";
+const wsScheme = location.protocol === 'https:' ? 'wss' : 'ws';
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
+
+function toast(msg){
+  const d = document.createElement('div'); d.className='toast'; d.textContent = msg;
+  document.getElementById('toasts').appendChild(d); setTimeout(()=>d.remove(), 9000);
+}
+function beep(){
+  try{ const c=new (window.AudioContext||window.webkitAudioContext)(), o=c.createOscillator(), g=c.createGain();
+    o.connect(g); g.connect(c.destination); o.frequency.value=880; g.gain.value=.15; o.start(); setTimeout(()=>{o.stop();c.close()},350);}catch(e){}
+}
+function notify(title, body, url){
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if ('serviceWorker' in navigator){
+    navigator.serviceWorker.ready.then(r => r.showNotification(title, {body, data:url||'/', vibrate:[200,100,200], tag:'race'}));
+  } else new Notification(title, {body});
+}
+
+// Ask permission on first visit
+const bar = document.getElementById('notifbar');
+if ('Notification' in window && Notification.permission === 'default'){
+  bar.style.display='block';
+  const ask = () => Notification.requestPermission().then(()=>{bar.style.display='none'});
+  document.getElementById('notifbtn').onclick = ask;
+  document.addEventListener('click', e => { if(e.target.id!=='notifbtn' && Notification.permission==='default') ask(); }, {once:true});
+}
+
+// Live connection to everyone on the site
+(function lobby(){
+  const ws = new WebSocket(`${wsScheme}://${location.host}/ws/lobby/`);
+  ws.onmessage = e => {
+    const d = JSON.parse(e.data);
+    if (d.type === 'race_started' && ROLE !== 'customer'){
+      toast(d.message); beep(); notify('🟢 New race started!', d.message, '/race/'+d.race.id+'/');
+    } else if (d.message && !d.silent){ toast(d.message); }
+    document.dispatchEvent(new CustomEvent('lobby', {detail:d}));
+  };
+  ws.onclose = () => setTimeout(lobby, 2000);
+})();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
+

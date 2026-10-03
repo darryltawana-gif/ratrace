@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>🏁 Start a race</h2>
+  <p>Tell sellers what you want. All sellers online will be alerted instantly. Your race lasts 5 minutes.</p>
+  <form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn">Start Race</button></form>
+</div>
+{% if reopenable %}
+<div class="card"><h3>Re-enter a race you left</h3>
+  {% for r in reopenable %}
+  <form method="post" action="{% url 'customer_reopen' r.id %}">{% csrf_token %}
+    {{ r.product }} <button class="btn small">Re-enter</button></form>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

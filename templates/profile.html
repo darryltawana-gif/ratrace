@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>Seller profile photo</h2>
+  {% if profile.photo %}<img src="{{ profile.photo.url }}" style="width:120px;height:120px;border-radius:50%;object-fit:cover">{% endif %}
+  <form method="post" enctype="multipart/form-data">{% csrf_token %}{{ form.as_p }}<button class="btn">Save</button></form>
+</div>
+{% endblock %}

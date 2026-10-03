@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>💬 Tell the creators what you think</h2>
+  <form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn">Send comment</button></form>
+</div>
+{% endblock %}
