@@ -30,7 +30,7 @@ def expire_races():
             broadcast("lobby", {"type": "race_ended", "race_id": r.id,
                                 "message": f"Race for “{r.product}” expired."})
             broadcast(f"race_{r.id}", {"type": "race_over",
-                                       "message": "⏰ Time is up. The race expired after 5 minutes. GAME OVER."})
+                                       "message": "⏰ Time is up. The race expired after 20 minutes. GAME OVER."})
 
 
 def seconds_left(race_id):

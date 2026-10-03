@@ -8,7 +8,7 @@ ANIMALS = [("Cheetah", "🐆"), ("Lion", "🦁"), ("Ostrich", "🦤"), ("Greyhou
            ("Buffalo", "🐃"), ("Kudu", "🦌"), ("Rhino", "🦏"), ("Hare", "🐇"),
            ("Stray Dog", "🐕‍🦺"), ("Tortoise", "🐢")]
 MAX_SELLERS = 10
-RACE_MINUTES = 5
+RACE_MINUTES = 20
 
 
 class Profile(models.Model):
