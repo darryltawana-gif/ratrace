@@ -1,5 +1,23 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="card"><h2>Sign up</h2>
-  <form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn">Create account</button></form></div>
+<div class="card narrow">
+  <h2>Create your account</h2>
+  {% if user.is_authenticated %}
+  <div class="msg">You are signed in as <b>{{ user.username }}</b>. Creating a new account will switch you to it. You can log back into this one any time.</div>
+  {% endif %}
+  <form method="post">{% csrf_token %}
+    {{ form.non_field_errors }}
+
+    <label for="id_username">Username</label>
+    {{ form.username }}
+    {% for e in form.username.errors %}<div class="err">{{ e }}</div>{% endfor %}
+
+    <label for="id_password">Password</label>
+    {{ form.password }}
+    {% for e in form.password.errors %}<div class="err">{{ e }}</div>{% endfor %}
+
+    <button class="btn" style="width:100%;margin-top:16px">Create account</button>
+  </form>
+  <p class="muted" style="margin-top:14px">Already have an account? <a href="{% url 'login' %}">Login</a></p>
+</div>
 {% endblock %}

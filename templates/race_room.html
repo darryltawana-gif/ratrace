@@ -1,90 +1,175 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
- .track{position:relative;height:56px;background:repeating-linear-gradient(90deg,#3b332b 0 40px,#332c25 40px 80px);border-radius:10px;overflow:hidden}
- .runner{position:absolute;top:2px;font-size:2.6rem;transition:left .6s ease;text-align:center;line-height:1}
- .runner small{display:block;font-size:.65rem;background:#000a;border-radius:4px;padding:0 4px}
- .finish{position:absolute;right:6px;top:8px;font-size:2rem}
- .pimg{width:100%;max-height:340px;object-fit:contain;background:#000;border-radius:10px;cursor:zoom-in}
- .ctrl{display:flex;align-items:center;gap:10px;margin:6px 0} .ctrl b{min-width:130px}
- #over{display:none;position:fixed;inset:0;background:#000d;z-index:100;text-align:center;padding-top:20vh}
- #over h1{font-size:3rem}
+ .track{position:relative;height:62px;border-radius:12px;overflow:hidden;margin-top:10px;border:1px solid #c5d0ea;background-color:#eaf0fc}
+ .track:before{content:"";position:absolute;left:0;right:0;top:50%;border-top:2px dashed #b5c3e3}
+ .runner{position:absolute;top:3px;font-size:2.4rem;line-height:1;text-align:center;transition:left .6s ease}
+ .runner small{display:block;font-size:.62rem;background-color:#0b1f4b;color:#ffffff;border-radius:5px;padding:0 5px;margin-top:1px}
+ .finish{position:absolute;right:0;top:0;bottom:0;width:26px;background-color:#ffffff;background-image:repeating-conic-gradient(#ffffff 0 25%,#0b1f4b 0 50%);background-size:13px 13px}
+ .lane.won{border:2px solid #d90429}
+ .lane-head{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+ .body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin-top:12px}
+ .pimg{width:100%;max-height:360px;object-fit:contain;background-color:#f3f6fc;border-radius:12px;cursor:zoom-in;border:1px solid #d9e1f1}
+ .price{font-size:1.5rem;font-weight:800}
+ .price s{color:#7a89aa;font-size:1.05rem;font-weight:500;margin-right:6px}
+ .price .now{color:#16a34a}
+ .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+ .actions form{margin:0}
+ .ctrl{display:flex;align-items:center;gap:10px;margin:8px 0;flex-wrap:wrap}
+ .ctrl b{min-width:130px}
+ .ctrl .val{min-width:120px;text-align:center;font-weight:700}
+ .ctrl input{flex:1;min-width:160px}
+ .seller-box{border-top:1px solid #d9e1f1;margin-top:12px;padding-top:6px}
+ .overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background-color:rgba(11,31,75,.9);z-index:100;align-items:center;justify-content:center;padding:20px;text-align:center}
+ .overbox{max-width:480px;background-color:#ffffff;border-top:6px solid #d90429;border-radius:20px;padding:28px}
+ .overbox h1{font-size:2.3rem;margin:0 0 8px}
+ @media (max-width:700px){.body{grid-template-columns:1fr}}
 </style>
 
+<div id="cfg" hidden data-race="{{ race.id }}" data-owner="{% if is_owner %}1{% else %}0{% endif %}"
+     data-csrf="{{ csrf_token }}" data-me="{{ request.user.id }}" data-live="{% if race.is_live %}1{% else %}0{% endif %}"></div>
+
 <div class="card">
-  <h2>🏁 {{ race.product }} <small>(budget {{ race.budget }})</small></h2>
-  <p>Started at <b id="start"></b> | <span id="cd"></span> | Spots left: <b id="slots"></b>/10</p>
+  <div class="row"><h2 style="margin:0">🏁 {{ race.product }}</h2><span class="chip">Budget {{ race.budget }}</span></div>
+  <p class="muted">Started at <b id="start"></b> · <span id="cd"></span> · Spots left <b id="slots"></b>/10</p>
   {% if is_owner and race.is_live %}
-  <form method="post" action="{% url 'customer_exit' race.id %}">{% csrf_token %}<button class="btn red">Exit race</button></form>
+  <form method="post" action="{% url 'customer_exit' race.id %}" onsubmit="return confirm('Exit this race?')">{% csrf_token %}<button class="btn danger">Exit race</button></form>
   {% endif %}
-  {% if mine %}
-  <form method="post" action="{% url 'seller_leave' race.id %}">{% csrf_token %}<button class="btn red">Exit race</button></form>
+  {% if mine and race.is_live %}
+  <form method="post" action="{% url 'seller_leave' race.id %}" onsubmit="return confirm('Leave the race? Everyone will be told you fainted.')">{% csrf_token %}<button class="btn danger">Exit race</button></form>
   {% endif %}
 </div>
 
 {% if form %}
 <div class="card">
   <h3>Join this race</h3>
-  <p>The earlier you join, the faster your animal (Cheetah first, Tortoise last).</p>
-  <form method="post" enctype="multipart/form-data">{% csrf_token %}{{ form.as_p }}<button class="btn green">Enter Race</button></form>
+  <p class="muted">The earlier you join, the faster your animal (Cheetah first, Tortoise last).</p>
+  <form method="post" enctype="multipart/form-data">{% csrf_token %}{{ form.as_p }}
+    <button class="btn green" style="width:100%;margin-top:8px">Enter Race</button></form>
 </div>
 {% endif %}
 
+{% if is_owner and race.is_live %}
+<div class="msg">💬 Want to talk to a seller first? Tap <b>Chat with seller</b> under any offer below.</div>
+{% endif %}
+
 <div id="lanes"></div>
-<div id="over"><h1>🏁 GAME OVER</h1><p id="overmsg" style="font-size:1.4rem"></p><a class="btn" href="/">Back home</a></div>
+
+<div id="over" class="overlay" data-initial="{{ end_message }}">
+  <div class="overbox">
+    <h1>🏁 GAME OVER</h1>
+    <p id="overmsg" style="font-size:1.25rem"></p>
+    <div class="row" style="justify-content:center">
+      <a id="overchat" class="btn navy" href="{{ chat_url }}" {% if not chat_url %}style="display:none"{% endif %}>💬 Open chat</a>
+      <button class="btn" onclick="hideOver()">View the race</button>
+      <a class="btn ghost" href="/">Back home</a>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-const RACE_ID = Number("{{ race.id }}"), IS_OWNER = "{{ is_owner|yesno:'true,false' }}" === "true", CSRF = "{{ csrf_token }}", ME = Number("{{ request.user.id }}");
-let expires = null, live = true;
+const cfg = document.getElementById('cfg').dataset;
+const RACE_ID = Number(cfg.race), IS_OWNER = cfg.owner === '1', CSRF = cfg.csrf, ME = Number(cfg.me);
+let live = cfg.live === '1', expires = null, winnerId = null, lastState = null, ws = null;
+let promoDraft = null, promoFocus = false;
 const lanes = document.getElementById('lanes');
+const over = document.getElementById('over');
+
+function money(v){ return Number(v).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function showOver(msg){ document.getElementById('overmsg').textContent = msg; over.style.display = 'flex'; }
+function hideOver(){ over.style.display = 'none'; }
+function send(o){ if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+function adj(field, dir){ send({action:'adjust', field:field, dir:dir}); }
+function savePromoItem(){
+  const el = document.getElementById('promoItem');
+  send({action:'promo_item', text: el ? el.value : ''}); promoDraft = null; toast('Free item saved');
+}
 
 function render(s){
-  const r = s.race; expires = new Date(r.expires_at);
+  lastState = s;
+  const r = s.race; expires = new Date(r.expires_at); winnerId = r.winner_id;
   document.getElementById('start').textContent = new Date(r.started_at).toLocaleTimeString();
   document.getElementById('slots').textContent = r.slots_left;
   lanes.innerHTML = s.participants.map(p => {
-    const mine = p.seller_id === ME;
-    return `<div class="card">
-      <div style="display:flex;gap:10px;align-items:center">
-        ${p.photo ? `<img src="${p.photo}" style="width:44px;height:44px;border-radius:50%;object-fit:cover">` : ''}
-        <b>#${p.slot} ${p.animal} ${p.emoji}: ${p.name}</b>
+    const mine = p.seller_id === ME, hasDisc = p.discount > 0, won = p.id === winnerId;
+    const canChat = IS_OWNER && (live || won);
+    return `<div class="card lane ${won ? 'won' : ''}">
+      <div class="lane-head">
+        ${p.photo ? `<img class="avatar" src="${esc(p.photo)}">` : '<div class="avatar ph">👤</div>'}
+        <div><b>#${p.slot} ${esc(p.animal)} ${p.emoji}</b><br><span class="muted">${esc(p.name)}</span></div>
+        ${won ? '<span class="chip win">🏆 Winner</span>' : ''}
       </div>
-      <div class="track"><div class="runner" style="left:${p.progress*0.88}%">${p.emoji}<small>${p.name}</small></div><div class="finish">🏁</div></div>
-      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;margin-top:10px">
-        <a href="${p.image}" target="_blank"><img class="pimg" src="${p.image}"></a>
-        <div><h3 style="margin:0">${p.product}</h3><h2 style="margin:4px 0">${p.price}</h2><p>${p.details}</p>
-          <p>💸 Discount: <b>${p.discount}%</b><br>🚚 Free delivery: <b>${p.delivery?'Yes':'No'}</b><br>
-          🎁 Promo: <b>${p.promo? 'Buy 1 get '+p.promo+' free':'None'}</b></p>
-          ${IS_OWNER && live ? `<form method="post" action="/race/${RACE_ID}/winner/${p.id}/"><input type="hidden" name="csrfmiddlewaretoken" value="${CSRF}"><button class="btn green">🏆 Choose as winner</button></form>` : ''}
+      <div class="track"><div class="runner" style="left:${p.progress * 0.88}%">${p.emoji}<small>${esc(p.name)}</small></div><div class="finish"></div></div>
+      <div class="body">
+        <a href="${esc(p.image)}" target="_blank"><img class="pimg" src="${esc(p.image)}"></a>
+        <div>
+          <h3 style="margin:0">${esc(p.product)}</h3>
+          <div class="price">${hasDisc ? `<s>${money(p.price)}</s>` : ''}<span class="now">${money(p.final_price)}</span>
+            ${hasDisc ? `<span class="chip win">-${p.discount}%</span>` : ''}</div>
+          <p>${esc(p.details)}</p>
+          <p>💸 Discount: <b>${p.discount}%</b><br>
+             🚚 Free delivery: <b>${p.delivery ? 'Yes' : 'No'}</b><br>
+             🎁 Promotion: <b>${p.promo ? 'Buy 1 get ' + p.promo + ' free' : 'None'}</b>
+             ${p.promo ? `<br>&nbsp;&nbsp;&nbsp;↳ Free item: <b>${esc(p.promo_item || 'same product')}</b>` : ''}</p>
+          <div class="actions">
+          ${canChat ? `<form method="post" action="/race/${RACE_ID}/chat/${p.id}/">
+              <input type="hidden" name="csrfmiddlewaretoken" value="${esc(CSRF)}">
+              <button class="btn navy">💬 Chat with seller</button></form>` : ''}
+          ${IS_OWNER && live ? `<form method="post" action="/race/${RACE_ID}/winner/${p.id}/" data-name="${esc(p.name)}"
+              onsubmit="return confirm('Choose ' + this.dataset.name + ' as the winner? This ends the race and opens a chat with them.')">
+              <input type="hidden" name="csrfmiddlewaretoken" value="${esc(CSRF)}">
+              <button class="btn green">🏆 Choose as winner</button></form>` : ''}
+          </div>
         </div>
       </div>
-      ${mine && live ? `
-        <hr>
-        <div class="ctrl"><b>Discount</b><button class="btn small" onclick="adj('discount',-1)">−</button><span>${p.discount}%</span><button class="btn small" onclick="adj('discount',1)">+</button></div>
-        <div class="ctrl"><b>Free delivery</b><button class="btn small" onclick="adj('delivery',-1)">−</button><span>${p.delivery?'ON':'OFF'}</span><button class="btn small" onclick="adj('delivery',1)">+</button></div>
-        <div class="ctrl"><b>Promotion</b><button class="btn small" onclick="adj('promo',-1)">−</button><span>${p.promo? 'Buy 1 get '+p.promo+' free':'None'}</span><button class="btn small" onclick="adj('promo',1)">+</button></div>` : ''}
+      ${mine && live ? `<div class="seller-box">
+        <div class="ctrl"><b>💸 Discount</b><button class="btn small" onclick="adj('discount',-1)">−</button>
+          <span class="val">${p.discount}%</span><button class="btn small" onclick="adj('discount',1)">+</button></div>
+        <div class="ctrl"><b>🚚 Free delivery</b><button class="btn small" onclick="adj('delivery',-1)">−</button>
+          <span class="val">${p.delivery ? 'ON' : 'OFF'}</span><button class="btn small" onclick="adj('delivery',1)">+</button></div>
+        <div class="ctrl"><b>🎁 Promotion</b><button class="btn small" onclick="adj('promo',-1)">−</button>
+          <span class="val">${p.promo ? 'Buy 1 get ' + p.promo + ' free' : 'None'}</span><button class="btn small" onclick="adj('promo',1)">+</button></div>
+        ${p.promo ? `<div class="ctrl"><b>🎁 Free item</b>
+          <input id="promoItem" maxlength="120" placeholder="Which product is free? (empty = same product)"
+            value="${esc(promoDraft !== null ? promoDraft : p.promo_item)}"
+            oninput="promoDraft=this.value" onfocus="promoFocus=true" onblur="promoFocus=false">
+          <button class="btn small navy" onclick="savePromoItem()">Save</button></div>` : ''}
+      </div>` : ''}
     </div>`;
-  }).join('') || '<p>No sellers in the race yet. Waiting for sellers…</p>';
+  }).join('') || '<p class="muted">No sellers in the race yet. Waiting for sellers…</p>';
+  if (promoFocus) {
+    const i = document.getElementById('promoItem');
+    if (i) { i.focus(); const n = i.value.length; i.setSelectionRange(n, n); }
+  }
 }
 
 (function connect(){
-  const ws = new WebSocket(`${wsScheme}://${location.host}/ws/race/${RACE_ID}/`);
-  window.adj = (field, dir) => ws.send(JSON.stringify({action:'adjust', field, dir}));
+  ws = new WebSocket(`${wsScheme}://${location.host}/ws/race/${RACE_ID}/`);
   ws.onmessage = e => {
     const d = JSON.parse(e.data);
     if (d.type === 'state') render(d.state);
     else if (d.type === 'event') { toast(d.message); beep(); notify('The Rat Race', d.message, location.href); }
     else if (d.type === 'race_over') {
-      live = false; document.getElementById('overmsg').textContent = d.message;
-      document.getElementById('over').style.display = 'block'; notify('Race over', d.message, '/');
+      live = false; showOver(d.message); notify('Race over', d.message, '/');
+      if (d.chat_url && Number(d.winner_user_id) === ME) {
+        const a = document.getElementById('overchat'); a.href = d.chat_url; a.style.display = 'inline-flex';
+      }
+      if (lastState) render(lastState);
     }
   };
   ws.onclose = () => { if (live) setTimeout(connect, 2000); };
 })();
 
-setInterval(()=>{ if(!expires) return; const s=Math.max(0,Math.floor((expires-Date.now())/1000));
-  document.getElementById('cd').textContent = `⏱ ${Math.floor(s/60)}:${String(s%60).padStart(2,'0')} left`; }, 1000);
+// Result popup for everyone who opens a finished race
+if (over.dataset.initial) showOver(over.dataset.initial);
+
+setInterval(() => {
+  if (!expires) return;
+  if (!live) { document.getElementById('cd').textContent = '🏁 Race ended'; return; }
+  const s = Math.max(0, Math.floor((expires - Date.now()) / 1000));
+  document.getElementById('cd').textContent = `⏱ ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} left`;
+}, 1000);
 </script>
 {% endblock %}

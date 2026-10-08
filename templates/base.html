@@ -3,25 +3,90 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#0b1f4b">
 <title>{% block title %}The Rat Race{% endblock %}</title>
 <link rel="manifest" href="/manifest.json">
 <style>
- :root{--bg:#14110f;--card:#221d19;--text:#f5efe6;--accent:#f4a63a;--green:#2ecc71;--red:#e74c3c}
- *{box-sizing:border-box} body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--text)}
- a{color:var(--accent)} nav{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px 16px;background:#000}
- nav .brand{font-weight:800;font-size:1.3rem;color:var(--accent);text-decoration:none;margin-right:auto}
- main{max-width:1000px;margin:0 auto;padding:16px}
- .btn{display:inline-block;background:var(--accent);color:#000;border:0;border-radius:10px;padding:10px 18px;font-weight:700;cursor:pointer;text-decoration:none;font-size:1rem}
- .btn.green{background:var(--green);animation:pulse 1s infinite} .btn.red{background:var(--red);color:#fff} .btn.small{padding:5px 12px}
- .card{background:var(--card);border-radius:14px;padding:16px;margin:12px 0}
- input,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid #555;background:#111;color:#fff}
- .msg{padding:10px 14px;border-radius:8px;margin:8px 0;background:#333} .msg.error{background:#7a2b2b} .msg.success{background:#1f5c36}
- .dot{display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--green);animation:beep 1s infinite;margin-right:6px}
- @keyframes beep{0%,100%{opacity:1;transform:scale(1);box-shadow:0 0 0 0 rgba(46,204,113,.8)}50%{opacity:.5;transform:scale(1.3);box-shadow:0 0 0 10px rgba(46,204,113,0)}}
- @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
- #toasts{position:fixed;top:10px;right:10px;left:10px;max-width:420px;margin-left:auto;z-index:99}
- .toast{background:#0d3b22;border:2px solid var(--green);padding:12px;border-radius:10px;margin-bottom:8px;box-shadow:0 4px 14px #000}
- #notifbar{background:#3a2a00;padding:10px 16px;display:none} 
+ :root{color-scheme:light;
+   --navy:#0b1f4b;--navy2:#16336f;--bg:#f3f6fc;--card:#ffffff;--border:#d9e1f1;--muted:#5a6a8c;
+   --red:#d90429;--red-d:#b30322;--green:#16a34a}
+ *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+ html{background-color:#f3f6fc;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+ body{margin:0;min-height:100vh;background-color:#f3f6fc;color:#0b1f4b;
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+      font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+ h1,h2,h3{margin:.4em 0;line-height:1.2;color:#0b1f4b;font-weight:800;letter-spacing:-.01em}
+ a{color:#d90429}
+ img{max-width:100%}
+ button,input,textarea,select{font:inherit;color:inherit}
+ .muted{color:#5a6a8c}
+
+ nav{position:-webkit-sticky;position:sticky;top:0;z-index:50;display:flex;flex-wrap:wrap;align-items:center;gap:10px;
+     padding:10px 18px;background-color:#0b1f4b;border-bottom:4px solid #d90429}
+ nav .brand{font-weight:800;font-size:1.3rem;color:#ffffff;text-decoration:none;margin-right:auto}
+ nav a:not(.brand):not(.btn){color:#ffffff;text-decoration:none;font-weight:600}
+ nav a:not(.brand):not(.btn):hover{text-decoration:underline}
+ nav form{margin:0}
+ nav .chip{background-color:#16336f;border-color:#3a5aa6;color:#ffffff}
+ nav .btn.navy{background-color:#ffffff;color:#0b1f4b;box-shadow:none}
+ nav .btn.ghost{background-color:transparent;border:1.5px solid #6f8cc9;color:#ffffff;box-shadow:none}
+ main{max-width:1040px;margin:0 auto;padding:20px 14px 80px}
+
+ .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;-webkit-appearance:none;appearance:none;
+      background-color:#d90429;color:#ffffff;border:0;border-radius:10px;padding:11px 20px;font-weight:700;
+      cursor:pointer;text-decoration:none;font-size:1rem;box-shadow:0 2px 0 #9c021e;transition:background-color .15s}
+ .btn:hover{background-color:#b30322}
+ .btn:disabled{opacity:.55;cursor:not-allowed}
+ .btn.navy,.btn.blue{background-color:#0b1f4b;box-shadow:0 2px 0 #050f2a}
+ .btn.navy:hover,.btn.blue:hover{background-color:#16336f}
+ .btn.green{background-color:#16a34a;box-shadow:0 2px 0 #0f7a36}
+ .btn.green:hover{background-color:#15803d}
+ .btn.ghost{background-color:#ffffff;color:#0b1f4b;border:1.5px solid #c5d0ea;box-shadow:none}
+ .btn.ghost:hover{background-color:#eef2fb}
+ .btn.danger{background-color:#ffffff;color:#d90429;border:1.5px solid #d90429;box-shadow:none}
+ .btn.danger:hover{background-color:#fff0f2}
+ .btn.small{padding:6px 14px;font-size:.9rem;border-radius:9px}
+ .btn.pulse{animation:pulse 1.2s infinite}
+
+ .card{background-color:#ffffff;border:1px solid #d9e1f1;border-radius:16px;padding:18px;margin:14px 0;box-shadow:0 1px 3px rgba(11,31,75,.08)}
+ .narrow{max-width:460px;margin:24px auto}
+ .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+ .sec{display:flex;align-items:center;gap:12px;margin:34px 0 10px}
+ .sec h2{margin:0;white-space:nowrap}
+ .sec:after{content:"";flex:1;height:2px;background-color:#d9e1f1}
+ .chip{display:inline-block;padding:2px 11px;border-radius:999px;background-color:#eaf0fc;border:1px solid #d3ddf2;color:#0b1f4b;font-size:.8rem;font-weight:700}
+ .chip.win{background-color:#fff0f2;border-color:#f3b4c0;color:#b30322}
+ .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}
+ .avatar{width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid #d90429;flex:none;background-color:#eaf0fc}
+ .avatar.ph{display:flex;align-items:center;justify-content:center;font-size:1.4rem;color:#0b1f4b}
+
+ form p{margin:0 0 6px}
+ label{display:block;font-weight:600;margin:12px 0 6px;color:#0b1f4b}
+ input:not([type=radio]):not([type=checkbox]):not([type=file]),textarea,select{
+   width:100%;padding:12px 13px;border-radius:10px;border:1.5px solid #c5d0ea;background-color:#ffffff;color:#0b1f4b;
+   font-size:16px;-webkit-appearance:none;appearance:none}
+ input:focus,textarea:focus,select:focus{outline:none;border-color:#d90429;box-shadow:0 0 0 3px rgba(217,4,41,.15)}
+ ::placeholder{color:#8a97b5;opacity:1}
+ input:-webkit-autofill,input:-webkit-autofill:focus{-webkit-box-shadow:0 0 0 1000px #ffffff inset;-webkit-text-fill-color:#0b1f4b;caret-color:#0b1f4b}
+ input[type=file]{width:100%;padding:11px;border:1.5px dashed #c5d0ea;border-radius:10px;background-color:#f7f9fe;color:#5a6a8c}
+ .errorlist,.err{color:#b30322;font-size:.92rem;margin:4px 0;list-style:none;padding:0}
+ .pw{position:relative}
+ .pw input{padding-right:96px}
+ .pwbtn{position:absolute;right:6px;top:50%;-webkit-transform:translateY(-50%);transform:translateY(-50%);background-color:#eaf0fc;color:#0b1f4b;
+        border:1px solid #c5d0ea;border-radius:8px;padding:5px 10px;font-size:.8rem;font-weight:600;cursor:pointer}
+
+ .msg{padding:12px 14px;border-radius:10px;margin:10px 0;background-color:#eaf0fc;border:1px solid #cdd9f1;color:#0b1f4b}
+ .msg.error{background-color:#fde8ec;border-color:#f1a5b4;color:#8a0f2b}
+ .msg.success{background-color:#e3f6ea;border-color:#9dd8b3;color:#14532d}
+ .dot{display:inline-block;width:14px;height:14px;border-radius:50%;background-color:#16a34a;animation:beep 1s infinite;margin-right:6px;vertical-align:middle}
+ @keyframes beep{0%,100%{opacity:1;transform:scale(1);box-shadow:0 0 0 0 rgba(22,163,74,.7)}50%{opacity:.6;transform:scale(1.25);box-shadow:0 0 0 10px rgba(22,163,74,0)}}
+ @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+ #toasts{position:fixed;top:72px;right:10px;left:10px;max-width:420px;margin-left:auto;z-index:99}
+ .toast{background-color:#0b1f4b;color:#ffffff;border-left:5px solid #d90429;padding:12px 14px;border-radius:10px;margin-bottom:8px;box-shadow:0 6px 18px rgba(11,31,75,.35)}
+ .toast a{color:#ffffff;font-weight:700;margin-left:6px}
+ #notifbar{background-color:#fff0f2;color:#0b1f4b;padding:10px 16px;display:none;border-bottom:1px solid #f3b4c0}
+ @media (max-width:560px){nav{gap:8px;padding:10px 12px}.btn{padding:10px 15px}}
 </style>
 </head>
 <body>
@@ -29,20 +94,22 @@
   <a class="brand" href="/">🐀 The Rat Race</a>
   <a href="{% url 'comments' %}">Comments</a>
   {% if user.is_authenticated %}
+    <a href="{% url 'chat_list' %}">💬 Chats</a>
     {% if role == 'none' %}
       <form method="post" action="{% url 'set_role' 'seller' %}">{% csrf_token %}<button class="btn small">I'm a Seller</button></form>
-      <form method="post" action="{% url 'set_role' 'customer' %}">{% csrf_token %}<button class="btn small">I'm a Customer</button></form>
+      <form method="post" action="{% url 'set_role' 'customer' %}">{% csrf_token %}<button class="btn small navy">I'm a Customer</button></form>
     {% else %}
-      {% if role == 'seller' %}<a href="{% url 'profile' %}">My profile photo</a>{% endif %}
-      <form method="post" action="{% url 'set_role' 'none' %}">{% csrf_token %}<button class="btn small red">Cancel {{ role }} mode</button></form>
+      {% if role == 'seller' %}<a href="{% url 'profile' %}">📷 My photo</a>{% endif %}
+      <form method="post" action="{% url 'set_role' 'none' %}">{% csrf_token %}<button class="btn small ghost">Cancel {{ role }} mode</button></form>
     {% endif %}
-    <span>👤 {{ user.username }}</span>
-    <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn small">Logout</button></form>
+    <span class="chip">👤 {{ user.username }}</span>
+    <a href="{% url 'signup' %}">➕ Add account</a>
+    <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn small ghost">Logout</button></form>
   {% else %}
-    <a href="{% url 'login' %}">Login</a> <a href="{% url 'signup' %}">Sign up</a>
+    <a href="{% url 'login' %}">Login</a> <a class="btn small" href="{% url 'signup' %}">Sign up</a>
   {% endif %}
 </nav>
-<div id="notifbar">🔔 Get alerted when a customer starts a race.
+<div id="notifbar">🔔 Get alerted when a customer starts a race or sends you a message.
   <button class="btn small" id="notifbtn">Enable notifications</button></div>
 <div id="toasts"></div>
 <main>
@@ -54,11 +121,15 @@
 const ROLE = "{{ role }}";
 const wsScheme = location.protocol === 'https:' ? 'wss' : 'ws';
 
+// Safe text for inserting into HTML (blocks script injection)
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
 
-function toast(msg){
-  const d = document.createElement('div'); d.className='toast'; d.textContent = msg;
-  document.getElementById('toasts').appendChild(d); setTimeout(()=>d.remove(), 9000);
+function toast(msg, url){
+  const d = document.createElement('div'); d.className = 'toast'; d.textContent = msg;
+  if (url){ const a = document.createElement('a'); a.href = url; a.textContent = 'Open chat →'; d.appendChild(a); }
+  document.getElementById('toasts').appendChild(d); setTimeout(() => d.remove(), 10000);
 }
 function beep(){
   try{ const c=new (window.AudioContext||window.webkitAudioContext)(), o=c.createOscillator(), g=c.createGain();
@@ -71,22 +142,46 @@ function notify(title, body, url){
   } else new Notification(title, {body});
 }
 
+// Show / hide password buttons
+document.querySelectorAll('input[type=password]').forEach(inp => {
+  const wrap = document.createElement('div'); wrap.className = 'pw';
+  inp.parentNode.insertBefore(wrap, inp); wrap.appendChild(inp);
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'pwbtn'; b.textContent = '👁 Show';
+  b.onclick = () => { const show = inp.type === 'password'; inp.type = show ? 'text' : 'password'; b.textContent = show ? '🙈 Hide' : '👁 Show'; };
+  wrap.appendChild(b);
+});
+
+// Stop double clicks: disable buttons once a form is submitted
+document.addEventListener('submit', e => {
+  if (e.defaultPrevented) return;
+  const btns = e.target.querySelectorAll('button[type=submit], button:not([type])');
+  setTimeout(() => btns.forEach(b => { b.disabled = true; }), 0);
+});
+window.addEventListener('pageshow', e => {
+  if (e.persisted) document.querySelectorAll('button:disabled').forEach(b => { b.disabled = false; });
+});
+
 // Ask permission on first visit
 const bar = document.getElementById('notifbar');
 if ('Notification' in window && Notification.permission === 'default'){
-  bar.style.display='block';
-  const ask = () => Notification.requestPermission().then(()=>{bar.style.display='none'});
+  bar.style.display = 'block';
+  const ask = () => Notification.requestPermission().then(() => { bar.style.display = 'none'; });
   document.getElementById('notifbtn').onclick = ask;
-  document.addEventListener('click', e => { if(e.target.id!=='notifbtn' && Notification.permission==='default') ask(); }, {once:true});
+  document.addEventListener('click', e => { if (e.target.id !== 'notifbtn' && Notification.permission === 'default') ask(); }, {once:true});
 }
 
-// Live connection to everyone on the site
+// Live connection: site-wide race alerts + private chat alerts
 (function lobby(){
   const ws = new WebSocket(`${wsScheme}://${location.host}/ws/lobby/`);
   ws.onmessage = e => {
     const d = JSON.parse(e.data);
-    if (d.type === 'race_started' && ROLE !== 'customer'){
-      toast(d.message); beep(); notify('🟢 New race started!', d.message, '/race/'+d.race.id+'/');
+    if (d.type === 'chat_request' || d.type === 'chat_message'){
+      // Do not alert when you are already inside that chat
+      if (!(window.CURRENT_CHAT && Number(window.CURRENT_CHAT) === Number(d.room_id))){
+        toast(d.message, d.url); beep(); notify('💬 The Rat Race', d.message, d.url);
+      }
+    } else if (d.type === 'race_started' && ROLE !== 'customer'){
+      toast(d.message); beep(); notify('🟢 New race started!', d.message, '/race/' + d.race.id + '/');
     } else if (d.message && !d.silent){ toast(d.message); }
     document.dispatchEvent(new CustomEvent('lobby', {detail:d}));
   };
@@ -96,4 +191,3 @@ if ('Notification' in window && Notification.permission === 'default'){
 {% block scripts %}{% endblock %}
 </body>
 </html>
-

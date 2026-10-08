@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+ .chatwrap{max-width:760px;margin:0 auto;background-color:#ffffff;border:1px solid #d9e1f1;border-radius:18px;overflow:hidden;box-shadow:0 1px 3px rgba(11,31,75,.08)}
+ .chathead{display:flex;align-items:center;gap:12px;padding:12px 14px;background-color:#0b1f4b;color:#ffffff;border-bottom:4px solid #d90429;flex-wrap:wrap}
+ .chathead .who{flex:1;min-width:140px}
+ .chathead .who b{display:block;font-size:1.05rem}
+ .chathead .who span{font-size:.85rem;color:#cdd9f3}
+ .chathead .btn.ghost{background-color:transparent;border-color:#6f8cc9;color:#ffffff}
+ .chathead .avatar{border-color:#ffffff}
+ #status{background-color:#16336f;border-color:#3a5aa6;color:#ffffff}
+ .offer{display:flex;gap:12px;align-items:center;padding:10px 14px;background-color:#f7f9fe;border-bottom:1px solid #d9e1f1}
+ .offer img{width:56px;height:56px;object-fit:cover;border-radius:10px;border:1px solid #d9e1f1;background-color:#ffffff}
+ .offer .t{flex:1;min-width:0}
+ .offer .t b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .msgs{display:flex;flex-direction:column;gap:8px;padding:14px;overflow-y:auto;height:58vh;max-height:560px;min-height:300px;background-color:#f3f6fc}
+ .bub{max-width:80%;padding:9px 13px;border-radius:16px;word-wrap:break-word;overflow-wrap:anywhere;white-space:pre-wrap}
+ .bub .time{font-size:.68rem;margin-top:3px;opacity:.75;text-align:right}
+ .bub.me{align-self:flex-end;background-color:#0b1f4b;color:#ffffff;border-bottom-right-radius:4px}
+ .bub.them{align-self:flex-start;background-color:#ffffff;color:#0b1f4b;border:1px solid #d9e1f1;border-bottom-left-radius:4px}
+ .sys{align-self:center;background-color:#fff0f2;color:#8a0f2b;border:1px solid #f3b4c0;border-radius:999px;padding:6px 14px;font-size:.88rem;text-align:center;max-width:92%}
+ .day{align-self:center;font-size:.75rem;color:#5a6a8c;font-weight:700;margin:6px 0}
+ .composer{display:flex;gap:8px;padding:10px;border-top:1px solid #d9e1f1;background-color:#ffffff;align-items:flex-end}
+ .composer textarea{flex:1;resize:none;max-height:120px;min-height:44px;line-height:1.4}
+</style>
+
+<div id="cfg" hidden data-room="{{ room.id }}" data-me="{{ request.user.id }}"></div>
+
+<div class="chatwrap">
+  <div class="chathead">
+    <a class="btn small ghost" href="{% url 'chat_list' %}">← Chats</a>
+    {% if other_photo %}<img class="avatar" src="{{ other_photo }}" alt="">{% else %}<div class="avatar ph" style="background-color:#ffffff">👤</div>{% endif %}
+    <div class="who"><b>{{ other_name }}</b><span>About “{{ race.product }}”</span></div>
+    <span id="status" class="chip">Connecting…</span>
+  </div>
+
+  {% if offer %}
+  <div class="offer">
+    <img src="{{ offer.image.url }}" alt="">
+    <div class="t">
+      <b>{{ offer.product_name }}</b>
+      <span class="muted">
+        {{ offer.final_price }}{% if offer.discount %} ({{ offer.discount }}% off){% endif %}
+        {% if offer.delivery %} · Free delivery{% endif %}
+        {% if offer.promo %} · Buy 1 get {{ offer.promo }} free{% if offer.promo_item %}: {{ offer.promo_item }}{% endif %}{% endif %}
+      </span>
+    </div>
+    <a class="btn small ghost" href="{% url 'race_room' race.id %}">View race</a>
+  </div>
+  {% endif %}
+
+  <div id="msgs" class="msgs"></div>
+
+  <div class="composer">
+    <textarea id="box" rows="1" maxlength="1000" placeholder="Type a message…  (Enter to send, Shift+Enter for a new line)"></textarea>
+    <button id="send" type="button" class="btn" disabled>Send</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const cfg = document.getElementById('cfg').dataset;
+const ROOM = Number(cfg.room), ME = Number(cfg.me);
+window.CURRENT_CHAT = ROOM;   // stops duplicate pop-ups for this chat
+
+const list = document.getElementById('msgs'), box = document.getElementById('box');
+const sendBtn = document.getElementById('send'), statusEl = document.getElementById('status');
+let ws = null, seen = new Set(), lastDay = '';
+
+function atBottom(){ return list.scrollHeight - list.scrollTop - list.clientHeight < 90; }
+function addMsg(m, stick){
+  if (seen.has(m.id)) return; seen.add(m.id);
+  const d = new Date(m.created), day = d.toDateString();
+  if (day !== lastDay){
+    lastDay = day;
+    const s = document.createElement('div'); s.className = 'day';
+    s.textContent = d.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'});
+    list.appendChild(s);
+  }
+  const el = document.createElement('div');
+  if (m.system){ el.className = 'sys'; el.textContent = m.text; }
+  else {
+    el.className = 'bub ' + (m.sender_id === ME ? 'me' : 'them');
+    const t = document.createElement('div'); t.textContent = m.text;
+    const ts = document.createElement('div'); ts.className = 'time';
+    ts.textContent = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    el.appendChild(t); el.appendChild(ts);
+  }
+  list.appendChild(el);
+  if (stick) list.scrollTop = list.scrollHeight;
+}
+
+function setStatus(ok){
+  statusEl.textContent = ok ? '● Online' : 'Reconnecting…';
+  sendBtn.disabled = !ok;
+}
+
+function connect(){
+  ws = new WebSocket(`${wsScheme}://${location.host}/ws/chat/${ROOM}/`);
+  ws.onopen = () => setStatus(true);
+  ws.onmessage = e => {
+    const d = JSON.parse(e.data);
+    if (d.type === 'history'){
+      list.innerHTML = ''; seen.clear(); lastDay = '';
+      d.messages.forEach(m => addMsg(m, false));
+      list.scrollTop = list.scrollHeight;
+    } else if (d.type === 'message'){
+      addMsg(d.message, atBottom() || d.message.sender_id === ME);
+    }
+  };
+  ws.onclose = () => { setStatus(false); setTimeout(connect, 2000); };
+}
+
+function sendMsg(){
+  const t = box.value.trim();
+  if (!t || !ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({text: t}));
+  box.value = ''; grow(); box.focus();
+}
+function grow(){ box.style.height = 'auto'; box.style.height = Math.min(box.scrollHeight, 120) + 'px'; }
+
+sendBtn.onclick = sendMsg;
+box.addEventListener('input', grow);
+box.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); sendMsg(); } });
+connect();
+</script>
+{% endblock %}

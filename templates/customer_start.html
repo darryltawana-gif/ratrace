@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="card">
+<div class="card narrow">
   <h2>🏁 Start a race</h2>
-  <p>Tell sellers what you want. All sellers online will be alerted instantly. Your race lasts 20 minutes.</p>
-  <form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn">Start Race</button></form>
+  <p class="muted">Tell sellers what you want. Every seller online is alerted instantly. Your race lasts {{ minutes }} minutes.</p>
+  <form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn" style="width:100%;margin-top:8px">Start Race</button></form>
 </div>
 {% if reopenable %}
-<div class="card"><h3>Re-enter a race you left</h3>
+<div class="card narrow"><h3>Re-enter a race you left</h3>
   {% for r in reopenable %}
-  <form method="post" action="{% url 'customer_reopen' r.id %}">{% csrf_token %}
-    {{ r.product }} <button class="btn small">Re-enter</button></form>
+  <form method="post" action="{% url 'customer_reopen' r.id %}" class="row">{% csrf_token %}
+    <span>{{ r.product }}</span> <button class="btn small green">Re-enter</button></form>
   {% endfor %}
 </div>
 {% endif %}

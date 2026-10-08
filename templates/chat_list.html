@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+ .chatrow{display:flex;gap:12px;align-items:center;padding:14px;background-color:#ffffff;border:1px solid #d9e1f1;border-radius:14px;margin:10px 0;text-decoration:none;color:#0b1f4b;box-shadow:0 1px 3px rgba(11,31,75,.08)}
+ .chatrow:hover{border-color:#d90429}
+ .chatrow .t{flex:1;min-width:0}
+ .chatrow .t b{display:block}
+ .chatrow .t span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .chatrow small{color:#5a6a8c;white-space:nowrap}
+</style>
+
+<div class="sec"><h2>💬 Your chats</h2></div>
+{% for it in items %}
+<a class="chatrow" href="{% url 'chat_room' it.room.id %}">
+  {% if it.photo %}<img class="avatar" src="{{ it.photo }}" alt="">{% else %}<div class="avatar ph">👤</div>{% endif %}
+  <div class="t">
+    <b>{{ it.name }} <span class="muted" style="display:inline;font-weight:500">· {{ it.room.race.product }}</span></b>
+    <span class="muted">{% if it.last %}{{ it.last.text|truncatechars:70 }}{% else %}No messages yet{% endif %}</span>
+  </div>
+  {% if it.last %}<small>{{ it.last.created|timesince }} ago</small>{% endif %}
+</a>
+{% empty %}
+<div class="card">
+  <p class="muted">No chats yet. Customers can start one with any seller in their race by tapping <b>Chat with seller</b>.
+  Winners are put into a chat automatically.</p>
+</div>
+{% endfor %}
+{% endblock %}
