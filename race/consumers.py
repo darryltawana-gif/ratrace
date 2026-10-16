@@ -104,3 +104,8 @@ class ChatConsumer(Base):
             {"type": "relay", "payload": {
                 "type": "chat_message", "room_id": int(self.room_id),
                 "message": f"💬 {res['from_label']}: {text[:80]}", "url": res["room_url"]}})
+        # ...and on their phone even if the site is closed
+        await database_sync_to_async(services.push_to_users)(
+            [res["to_user_id"]],
+            {"title": f"💬 {res['from_label']}", "body": text[:120], "url": res["room_url"],
+             "tag": f"chat-{self.room_id}"}, 3600)

@@ -1,3 +1,6 @@
+import io
+import json
+
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
@@ -8,10 +11,11 @@ from django.http import JsonResponse, HttpResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.cache import cache_control
 from django.views.decorators.http import require_POST
 
 from .forms import RaceForm, JoinForm, ProfileForm, CommentForm, SignupForm
-from .models import Race, Participant, Profile, ChatRoom, ANIMALS, RACE_MINUTES
+from .models import Race, Participant, Profile, ChatRoom, PushSubscription, ANIMALS, RACE_MINUTES
 from . import services as sv
 
 
@@ -102,6 +106,7 @@ def customer_start(request):
         race.save()
         sv.broadcast("lobby", {"type": "race_started", "race": sv.lobby_race(race),
                                "message": f"🟢 A customer started a new race: {race.product} (budget {race.budget})"})
+        sv.push_race_started(race)          # phones get alerted even when the site is closed
         return redirect("race_room", race.id)
     reopenable = Race.objects.filter(customer=request.user, status="closed", expires_at__gt=timezone.now())
     return render(request, "customer_start.html", {"form": form, "reopenable": reopenable,
@@ -186,6 +191,7 @@ def customer_reopen(request, race_id):
         race.save()
         sv.broadcast("lobby", {"type": "race_started", "race": sv.lobby_race(race),
                                "message": f"🟢 A customer re-entered the race: {race.product}"})
+        sv.push_race_started(race, reopened=True)
         return redirect("race_room", race.id)
     messages.error(request, "That race has expired.")
     return redirect("start")
@@ -215,6 +221,9 @@ def pick_winner(request, race_id, pid):
                            "message": f"{p.display_name} won the race for “{race.product}”!"})
     sv.broadcast(f"user_{p.seller_id}", {"type": "chat_request", "room_id": room.id, "url": chat_url,
                                          "message": f"🏆 You won “{race.product}”! {request.user.username} is waiting in the chat."})
+    sv.push_to_users([p.seller_id], {"title": "🏆 You won the race!",
+                                     "body": f"{request.user.username} chose you for “{race.product}”. Tap to chat.",
+                                     "url": chat_url, "tag": f"win-{race.id}", "sticky": True}, 3600)
     messages.success(request, f"You chose {p.display_name} as the winner! Say hello below.")
     return redirect("chat_room", room.id)
 
@@ -252,6 +261,9 @@ def start_chat(request, race_id, pid):
     url = reverse("chat_room", args=[room.id])
     sv.broadcast(f"user_{p.seller_id}", {"type": "chat_request", "room_id": room.id, "url": url,
                                          "message": f"💬 {request.user.username} wants to chat about “{race.product}”"})
+    sv.push_to_users([p.seller_id], {"title": "💬 A customer wants to chat",
+                                     "body": f"{request.user.username} is asking about “{race.product}”. Tap to reply.",
+                                     "url": url, "tag": f"chat-{room.id}", "sticky": True}, 3600)
     return redirect("chat_room", room.id)
 
 
@@ -287,6 +299,38 @@ def chat_room(request, room_id):
         "other_photo": prof.photo.url if prof.photo else ""})
 
 
+# ------------------------------- Push alerts -------------------------------
+
+@require_POST
+@login_required
+def push_subscribe(request):
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+        endpoint = data["endpoint"]
+        keys = data["keys"]
+        p256dh, auth = keys["p256dh"], keys["auth"]
+    except (ValueError, KeyError, TypeError):
+        return JsonResponse({"ok": False, "error": "bad subscription"}, status=400)
+    if not str(endpoint).startswith("https://"):
+        return JsonResponse({"ok": False, "error": "bad endpoint"}, status=400)
+    # One device = one subscription. Whoever is signed in on that device receives its alerts.
+    PushSubscription.objects.update_or_create(
+        endpoint=endpoint,
+        defaults={"user": request.user, "p256dh": p256dh, "auth": auth,
+                  "user_agent": request.META.get("HTTP_USER_AGENT", "")[:300]})
+    return JsonResponse({"ok": True})
+
+
+@require_POST
+@login_required
+def push_test(request):
+    sent = sv.push_to_users([request.user.id], {
+        "title": "✅ Alerts are working!",
+        "body": "You will be told when a customer starts a race, even when the site is closed.",
+        "url": "/", "tag": "test", "force": True}, 300)
+    return JsonResponse({"sent": sent})
+
+
 # ------------------------------- Other pages -------------------------------
 
 @login_required
@@ -319,19 +363,71 @@ def sw_js(request):
     js = """
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(clients.claim()));
+
+// A push arrives from the server, even when the website and browser are closed
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (err) {}
+  e.waitUntil((async () => {
+    const wins = await clients.matchAll({type: 'window', includeUncontrolled: true});
+    const visible = wins.some(c => c.visibilityState === 'visible');
+    if (visible && !d.force) return;   // the open page already shows its own alert
+    await self.registration.showNotification(d.title || 'The Rat Race', {
+      body: d.body || '',
+      data: d.url || '/',
+      tag: d.tag || 'rat-race',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      vibrate: [200, 100, 200, 100, 200],
+      requireInteraction: true
+    });
+  })());
+});
+
 self.addEventListener('notificationclick', e => {
   e.notification.close();
-  e.waitUntil(clients.openWindow(e.notification.data || '/'));
-});
-self.addEventListener('push', e => {
-  const d = e.data ? e.data.json() : {};
-  e.waitUntil(self.registration.showNotification(d.title || 'The Rat Race', {body: d.body, data: d.url || '/'}));
+  const url = e.notification.data || '/';
+  e.waitUntil((async () => {
+    const wins = await clients.matchAll({type: 'window', includeUncontrolled: true});
+    for (const c of wins) {
+      if ('focus' in c) {
+        await c.focus();
+        if ('navigate' in c) { try { await c.navigate(url); } catch (err) {} }
+        return;
+      }
+    }
+    await clients.openWindow(url);
+  })());
 });
 """
-    return HttpResponse(js, content_type="application/javascript")
+    resp = HttpResponse(js, content_type="application/javascript")
+    resp["Cache-Control"] = "no-cache"
+    resp["Service-Worker-Allowed"] = "/"
+    return resp
 
 
 def manifest(request):
-    return JsonResponse({"name": "The Rat Race", "short_name": "RatRace", "start_url": "/",
-                         "display": "standalone", "background_color": "#ffffff", "theme_color": "#0b1f4b",
-                         "icons": []})
+    return JsonResponse({
+        "name": "The Rat Race", "short_name": "RatRace", "start_url": "/", "scope": "/",
+        "display": "standalone", "background_color": "#0b1f4b", "theme_color": "#0b1f4b",
+        "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+                  {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}]})
+
+
+@cache_control(max_age=86400, public=True)
+def icon_png(request, size):
+    """App icon (navy square, red circle, white R). Used for the home-screen icon and notifications."""
+    from PIL import Image, ImageDraw, ImageFont
+    size = size if size in (180, 192, 512) else 192
+    img = Image.new("RGB", (size, size), "#0b1f4b")
+    d = ImageDraw.Draw(img)
+    m = int(size * 0.10)
+    d.ellipse([m, m, size - m, size - m], fill="#d90429")
+    try:
+        font = ImageFont.load_default(size=int(size * 0.5))
+        d.text((size / 2, size / 2), "R", fill="#ffffff", font=font, anchor="mm")
+    except Exception:
+        d.text((size * 0.42, size * 0.38), "R", fill="#ffffff")
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return HttpResponse(buf.getvalue(), content_type="image/png")

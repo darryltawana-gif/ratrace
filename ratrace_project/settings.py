@@ -146,7 +146,7 @@ if "RENDER" in os.environ:
     CSRF_TRUSTED_ORIGINS = ["https://" + HOST]
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-    DATABASES["default"] = dj_database_url.config(conn_max_age=600)
+    DATABASES["default"] = dj_database_url.config(conn_max_age=600)     
 
     CHANNEL_LAYERS = {
         "default": {
@@ -175,3 +175,8 @@ if "RENDER" in os.environ:
         AWS_QUERYSTRING_AUTH = False
         AWS_S3_FILE_OVERWRITE = False
         AWS_DEFAULT_ACL = None
+
+
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
+VAPID_ADMIN_EMAIL = os.environ.get("VAPID_ADMIN_EMAIL", "admin@example.com")        

@@ -1,5 +1,11 @@
+from django.conf import settings
+
+
 def role(request):
+    ctx = {"vapid_public_key": getattr(settings, "VAPID_PUBLIC_KEY", "")}
     if request.user.is_authenticated:
         from .services import get_profile
-        return {"role": get_profile(request.user).role}
-    return {"role": "none"}
+        ctx["role"] = get_profile(request.user).role
+    else:
+        ctx["role"] = "none"
+    return ctx

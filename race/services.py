@@ -1,11 +1,17 @@
+import json
+import logging
+from concurrent.futures import ThreadPoolExecutor
+
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
-from django.db import transaction
+from django.conf import settings
+from django.db import connection, transaction
 from django.db.models import Q
 from django.utils import timezone
-from .models import (Race, Participant, Profile, ChatRoom, ChatMessage,
+from .models import (Race, Participant, Profile, ChatRoom, ChatMessage, PushSubscription,
                      MAX_SELLERS, RACE_MINUTES)
 
+log = logging.getLogger(__name__)
 MAX_DISCOUNT = 50
 
 
@@ -150,3 +156,80 @@ def save_message(user, room_id, text):
     to_user = room.seller_id if user.id == room.customer_id else room.customer_id
     return {"message": msg_dict(m), "to_user_id": to_user, "room_url": f"/chat/{room.id}/",
             "from_label": display_name(user, room.race)}
+
+
+# --------------------- Push notifications (work when the site is closed) ---------------------
+
+_push_pool = ThreadPoolExecutor(max_workers=6)
+
+
+def push_enabled():
+    return bool(getattr(settings, "VAPID_PRIVATE_KEY", "") and getattr(settings, "VAPID_PUBLIC_KEY", ""))
+
+
+def _send_one(sub, payload, ttl):
+    """Runs in a background thread so the website never waits for phones."""
+    try:
+        from pywebpush import webpush, WebPushException
+    except ImportError:
+        log.warning("pywebpush is not installed; push skipped")
+        return
+    dead = False
+    try:
+        webpush(
+            subscription_info={"endpoint": sub["endpoint"],
+                               "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]}},
+            data=json.dumps(payload),
+            vapid_private_key=settings.VAPID_PRIVATE_KEY,
+            vapid_claims={"sub": "mailto:" + settings.VAPID_ADMIN_EMAIL},
+            ttl=ttl,
+            headers={"Urgency": "high"},
+        )
+    except WebPushException as ex:
+        status = getattr(getattr(ex, "response", None), "status_code", None)
+        if status in (404, 410):
+            dead = True          # the phone removed the subscription
+        else:
+            log.warning("Web push failed (%s): %s", status, ex)
+    except Exception:
+        log.exception("Web push crashed")
+    if dead:
+        try:
+            PushSubscription.objects.filter(endpoint=sub["endpoint"]).delete()
+        finally:
+            connection.close()
+
+
+def _dispatch(subs, payload, ttl):
+    if not push_enabled():
+        return 0
+    n = 0
+    for s in subs:
+        _push_pool.submit(_send_one, s, payload, ttl)
+        n += 1
+    return n
+
+
+def push_to_users(user_ids, payload, ttl=3600):
+    try:
+        subs = list(PushSubscription.objects.filter(user_id__in=list(user_ids))
+                    .values("endpoint", "p256dh", "auth"))
+        return _dispatch(subs, payload, ttl)
+    except Exception:
+        log.exception("push_to_users failed")
+        return 0
+
+
+def push_race_started(race, reopened=False):
+    """Alert every seller (and undecided user), except customers, even if their site is closed."""
+    try:
+        subs = list(PushSubscription.objects.exclude(user=race.customer)
+                    .exclude(user__profile__role="customer")
+                    .values("endpoint", "p256dh", "auth"))
+        payload = {"title": "🟢 Race re-opened!" if reopened else "🟢 New race started!",
+                   "body": f"A customer wants “{race.product}” (budget {race.budget}). Tap to enter the race!",
+                   "url": f"/race/{race.id}/", "tag": f"race-{race.id}", "sticky": True}
+        return _dispatch(subs, payload, RACE_MINUTES * 60)
+    except Exception:
+        log.exception("push_race_started failed")
+        return 0

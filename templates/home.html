@@ -160,13 +160,17 @@
 <div id="live"><p class="muted">Loading…</p></div>
 
 <div class="card tip">
-  <h3>🔔 Crucial tip: never miss a race or a message</h3>
+  <h3>🔔 Never miss a race: alerts work even when the site is closed</h3>
   <ol>
-    <li>Tap <b>Allow</b> when the browser asks about notifications.</li>
-    <li>On your phone, <b>install the site</b>: Chrome menu ⋮ → <i>Add to Home screen</i> (iPhone: Safari Share → <i>Add to Home Screen</i>).</li>
-    <li>Keep the site open in a tab (don't swipe it away) while you use other apps, and turn off battery saver for your browser.</li>
-    <li>Make sure notifications for your browser are enabled in your phone Settings.</li>
+    <li>Log in and tap <b>Turn on alerts</b> in the banner at the top, then choose <b>Allow</b>. Do this once on every phone or computer you use.</li>
+    <li><b>iPhone / iPad:</b> first tap Share → <i>Add to Home Screen</i>, open The Rat Race from your home screen, then turn on alerts (needs iOS 16.4 or newer).</li>
+    <li><b>Android:</b> install the site (Chrome menu ⋮ → <i>Add to Home screen</i>) and turn off battery saver for your browser.</li>
+    <li>Swiping the site away is fine. Please don't "Force stop" your browser.</li>
   </ol>
+  {% if user.is_authenticated %}
+  <button type="button" class="btn small" onclick="testAlert()">📨 Send me a test alert</button>
+  <span class="muted" style="font-size:.9rem">Tip: after tapping, close the site and watch for the alert.</span>
+  {% endif %}
 </div>
 
 <div class="sec"><h2>🏁 The animal ranking</h2></div>

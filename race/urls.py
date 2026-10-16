@@ -17,6 +17,9 @@ urlpatterns = [
     path("profile/", views.seller_profile, name="profile"),
     path("comments/", views.comments, name="comments"),
     path("api/live-races/", views.api_live, name="api_live"),
+    path("push/subscribe/", views.push_subscribe, name="push_subscribe"),
+    path("push/test/", views.push_test, name="push_test"),
+    path("icon-<int:size>.png", views.icon_png, name="icon"),
     path("sw.js", views.sw_js),
     path("manifest.json", views.manifest),
 ]

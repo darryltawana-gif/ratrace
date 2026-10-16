@@ -5,8 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="theme-color" content="#0b1f4b">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Rat Race">
 <title>{% block title %}The Rat Race{% endblock %}</title>
 <link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-180.png">
 <style>
  :root{color-scheme:light;
    --navy:#0b1f4b;--navy2:#16336f;--bg:#f3f6fc;--card:#ffffff;--border:#d9e1f1;--muted:#5a6a8c;
@@ -82,10 +87,22 @@
  .dot{display:inline-block;width:14px;height:14px;border-radius:50%;background-color:#16a34a;animation:beep 1s infinite;margin-right:6px;vertical-align:middle}
  @keyframes beep{0%,100%{opacity:1;transform:scale(1);box-shadow:0 0 0 0 rgba(22,163,74,.7)}50%{opacity:.6;transform:scale(1.25);box-shadow:0 0 0 10px rgba(22,163,74,0)}}
  @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
- #toasts{position:fixed;top:72px;right:10px;left:10px;max-width:420px;margin-left:auto;z-index:99}
- .toast{background-color:#0b1f4b;color:#ffffff;border-left:5px solid #d90429;padding:12px 14px;border-radius:10px;margin-bottom:8px;box-shadow:0 6px 18px rgba(11,31,75,.35)}
- .toast a{color:#ffffff;font-weight:700;margin-left:6px}
- #notifbar{background-color:#fff0f2;color:#0b1f4b;padding:10px 16px;display:none;border-bottom:1px solid #f3b4c0}
+
+ /* Pop-up messages stay until the user closes them */
+ #toasts{position:fixed;top:72px;right:10px;left:10px;max-width:420px;margin-left:auto;z-index:99;
+         max-height:calc(100vh - 90px);overflow-y:auto}
+ .toast{position:relative;background-color:#0b1f4b;color:#ffffff;border-left:5px solid #d90429;
+        padding:13px 44px 13px 14px;border-radius:10px;margin-bottom:8px;box-shadow:0 6px 18px rgba(11,31,75,.35);
+        font-size:1rem;line-height:1.45;word-wrap:break-word;overflow-wrap:anywhere}
+ .toast a{color:#ffffff;font-weight:700;margin-left:6px;text-decoration:underline}
+ .toast .x{position:absolute;top:6px;right:6px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;
+           background-color:transparent;border:0;border-radius:8px;color:#ffffff;font-size:1.6rem;line-height:1;cursor:pointer}
+ .toast .x:hover{background-color:rgba(255,255,255,.2)}
+ #clearall{display:none;margin:0 0 8px auto;background-color:#ffffff;color:#0b1f4b;border:1.5px solid #c5d0ea;border-radius:999px;
+           padding:5px 14px;font-size:.85rem;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(11,31,75,.2)}
+
+ #notifbar{background-color:#fff0f2;color:#0b1f4b;padding:10px 16px;display:none;border-bottom:1px solid #f3b4c0;font-weight:500}
+ #notifbar .btn{margin-left:8px}
  @media (max-width:560px){nav{gap:8px;padding:10px 12px}.btn{padding:10px 15px}}
 </style>
 </head>
@@ -109,9 +126,8 @@
     <a href="{% url 'login' %}">Login</a> <a class="btn small" href="{% url 'signup' %}">Sign up</a>
   {% endif %}
 </nav>
-<div id="notifbar">🔔 Get alerted when a customer starts a race or sends you a message.
-  <button class="btn small" id="notifbtn">Enable notifications</button></div>
-<div id="toasts"></div>
+<div id="notifbar"><span id="notiftxt"></span><button type="button" class="btn small" id="notifbtn">🔔 Turn on alerts</button></div>
+<div id="toasts"><button type="button" id="clearall">Clear all</button></div>
 <main>
   {% for m in messages %}<div class="msg {{ m.tags }}">{{ m }}</div>{% endfor %}
   {% block content %}{% endblock %}
@@ -119,6 +135,8 @@
 
 <script>
 const ROLE = "{{ role }}";
+const USER_ID = "{{ user.id|default:'' }}";
+const VAPID_PUBLIC = "{{ vapid_public_key }}";
 const wsScheme = location.protocol === 'https:' ? 'wss' : 'ws';
 
 // Safe text for inserting into HTML (blocks script injection)
@@ -126,20 +144,117 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
 
-function toast(msg, url){
-  const d = document.createElement('div'); d.className = 'toast'; d.textContent = msg;
-  if (url){ const a = document.createElement('a'); a.href = url; a.textContent = 'Open chat →'; d.appendChild(a); }
-  document.getElementById('toasts').appendChild(d); setTimeout(() => d.remove(), 10000);
+// Pop-up messages: they stay on screen until the user taps the ×
+function syncClear(){
+  const box = document.getElementById('toasts');
+  document.getElementById('clearall').style.display = box.querySelectorAll('.toast').length > 1 ? 'block' : 'none';
 }
+document.getElementById('clearall').onclick = () => {
+  document.querySelectorAll('#toasts .toast').forEach(t => t.remove());
+  syncClear();
+};
+function toast(msg, url){
+  const box = document.getElementById('toasts');
+  const d = document.createElement('div'); d.className = 'toast'; d.setAttribute('role', 'alert');
+  const t = document.createElement('span'); t.textContent = msg; d.appendChild(t);
+  if (url){ const a = document.createElement('a'); a.href = url; a.textContent = 'Open chat →'; d.appendChild(a); }
+  const x = document.createElement('button'); x.type = 'button'; x.className = 'x';
+  x.setAttribute('aria-label', 'Dismiss message'); x.textContent = '×';
+  x.onclick = () => { d.remove(); syncClear(); };
+  d.appendChild(x);
+  box.appendChild(d); syncClear();
+}
+
 function beep(){
   try{ const c=new (window.AudioContext||window.webkitAudioContext)(), o=c.createOscillator(), g=c.createGain();
     o.connect(g); g.connect(c.destination); o.frequency.value=880; g.gain.value=.15; o.start(); setTimeout(()=>{o.stop();c.close()},350);}catch(e){}
 }
-function notify(title, body, url){
+function notify(title, body, url, tag){
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const opts = {body, data:url||'/', vibrate:[200,100,200], tag:tag||'race', icon:'/icon-192.png', badge:'/icon-192.png',
+                requireInteraction:true};   // stays until the user dismisses it
   if ('serviceWorker' in navigator){
-    navigator.serviceWorker.ready.then(r => r.showNotification(title, {body, data:url||'/', vibrate:[200,100,200], tag:'race'}));
-  } else new Notification(title, {body});
+    navigator.serviceWorker.ready.then(r => r.showNotification(title, opts));
+  } else new Notification(title, opts);
+}
+
+// ---------------- Alerts that work even when the site is closed (Web Push) ----------------
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+const isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k, v){ try{ localStorage.setItem(k, v); }catch(e){} }
+function csrf(){
+  const el = document.querySelector('input[name=csrfmiddlewaretoken]');
+  if (el) return el.value;
+  const m = document.cookie.match(/csrftoken=([^;]+)/); return m ? m[1] : '';
+}
+function b64ToUint8(b64){
+  const pad = '='.repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw.split('').map(c => c.charCodeAt(0)));
+}
+
+async function enablePush(){
+  if (!pushSupported || !VAPID_PUBLIC || !USER_ID) return false;
+  try{
+    if (Notification.permission === 'default') await Notification.requestPermission();
+    if (Notification.permission !== 'granted') return false;
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:b64ToUint8(VAPID_PUBLIC)});
+    const key = sub.endpoint + '|' + USER_ID;
+    if (lsGet('pushsent') !== key){
+      const r = await fetch('/push/subscribe/', {method:'POST',
+        headers:{'Content-Type':'application/json', 'X-CSRFToken':csrf()}, body:JSON.stringify(sub.toJSON())});
+      if (!r.ok) return false;
+      lsSet('pushsent', key);
+    }
+    return true;
+  }catch(err){ console.error('Push setup failed', err); return false; }
+}
+
+async function testAlert(){
+  if (!USER_ID){ toast('Please log in first.'); return; }
+  if (!('Notification' in window)){ toast('This browser cannot show alerts.'); return; }
+  if (Notification.permission !== 'granted'){
+    const ok = await enablePush(); updateBanner();
+    if (!ok){ toast('Please allow notifications first.'); return; }
+  } else { await enablePush(); }
+  try{
+    const r = await fetch('/push/test/', {method:'POST', headers:{'X-CSRFToken':csrf()}});
+    const d = await r.json();
+    toast(d.sent ? '📨 Test sent! You can close the site now and watch for it.' : 'No alert device found yet. Turn on alerts first.');
+  }catch(e){ toast('Could not send the test alert.'); }
+}
+
+function updateBanner(){
+  const bar = document.getElementById('notifbar'), txt = document.getElementById('notiftxt'), btn = document.getElementById('notifbtn');
+  const show = (html, withBtn) => { txt.innerHTML = html; btn.style.display = withBtn ? '' : 'none'; bar.style.display = 'block'; };
+  if (!USER_ID) return show('🔔 Sign up or log in, then turn on alerts to be told about new races even when the site is closed.', false);
+  if (isIOS && !isStandalone) return show('📱 <b>iPhone / iPad:</b> to get alerts when the site is closed, tap <b>Share → Add to Home Screen</b>, then open The Rat Race from your home screen and turn on alerts.', false);
+  if (!pushSupported) return show('Your browser cannot send alerts when closed. Please use Chrome, Edge, Firefox or Safari (home-screen app).', false);
+  if (Notification.permission === 'denied') return show('🔕 Alerts are blocked. Tap the 🔒 icon next to the web address → <b>Notifications → Allow</b>, then reload this page.', false);
+  if (Notification.permission === 'granted'){ bar.style.display = 'none'; return; }
+  show('🔔 Turn on alerts to be told the moment a customer starts a race, even when the site is closed.', true);
+}
+
+document.getElementById('notifbtn').onclick = async () => {
+  const ok = await enablePush(); updateBanner();
+  if (ok) toast('✅ Alerts are on! You will be notified even when the site is closed.');
+  else if (Notification.permission === 'granted') toast('Setup did not finish. Please reload and try again.');
+};
+updateBanner();
+
+if (USER_ID && pushSupported){
+  if (Notification.permission === 'granted') enablePush();     // keep this device registered
+  else if (Notification.permission === 'default' && !(isIOS && !isStandalone)){
+    // first visit: ask on the first tap anywhere
+    document.addEventListener('click', e => {
+      if (e.target.id !== 'notifbtn' && Notification.permission === 'default') enablePush().then(updateBanner);
+    }, {once:true});
+  }
 }
 
 // Show / hide password buttons
@@ -161,15 +276,6 @@ window.addEventListener('pageshow', e => {
   if (e.persisted) document.querySelectorAll('button:disabled').forEach(b => { b.disabled = false; });
 });
 
-// Ask permission on first visit
-const bar = document.getElementById('notifbar');
-if ('Notification' in window && Notification.permission === 'default'){
-  bar.style.display = 'block';
-  const ask = () => Notification.requestPermission().then(() => { bar.style.display = 'none'; });
-  document.getElementById('notifbtn').onclick = ask;
-  document.addEventListener('click', e => { if (e.target.id !== 'notifbtn' && Notification.permission === 'default') ask(); }, {once:true});
-}
-
 // Live connection: site-wide race alerts + private chat alerts
 (function lobby(){
   const ws = new WebSocket(`${wsScheme}://${location.host}/ws/lobby/`);
@@ -178,10 +284,10 @@ if ('Notification' in window && Notification.permission === 'default'){
     if (d.type === 'chat_request' || d.type === 'chat_message'){
       // Do not alert when you are already inside that chat
       if (!(window.CURRENT_CHAT && Number(window.CURRENT_CHAT) === Number(d.room_id))){
-        toast(d.message, d.url); beep(); notify('💬 The Rat Race', d.message, d.url);
+        toast(d.message, d.url); beep(); notify('💬 The Rat Race', d.message, d.url, 'chat-' + d.room_id);
       }
     } else if (d.type === 'race_started' && ROLE !== 'customer'){
-      toast(d.message); beep(); notify('🟢 New race started!', d.message, '/race/' + d.race.id + '/');
+      toast(d.message); beep(); notify('🟢 New race started!', d.message, '/race/' + d.race.id + '/', 'race-' + d.race.id);
     } else if (d.message && !d.silent){ toast(d.message); }
     document.dispatchEvent(new CustomEvent('lobby', {detail:d}));
   };
