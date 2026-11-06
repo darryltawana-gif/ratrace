@@ -1,49 +1,54 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
- .track{position:relative;height:62px;border-radius:12px;overflow:hidden;margin-top:10px;border:1px solid #c5d0ea;background-color:#eaf0fc}
- .track:before{content:"";position:absolute;left:0;right:0;top:50%;border-top:2px dashed #b5c3e3}
- .runner{position:absolute;top:3px;font-size:2.4rem;line-height:1;text-align:center;transition:left .6s ease}
- .runner small{display:block;font-size:.62rem;background-color:#0b1f4b;color:#ffffff;border-radius:5px;padding:0 5px;margin-top:1px}
- .finish{position:absolute;right:0;top:0;bottom:0;width:26px;background-color:#ffffff;background-image:repeating-conic-gradient(#ffffff 0 25%,#0b1f4b 0 50%);background-size:13px 13px}
- .lane.won{border:2px solid #d90429}
- .lane-head{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
  .body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin-top:12px}
- .pimg{width:100%;max-height:360px;object-fit:contain;background-color:#f3f6fc;border-radius:12px;cursor:zoom-in;border:1px solid #d9e1f1}
+ .pimg{width:100%;max-height:340px;object-fit:contain;background:#f3f6fc;border-radius:12px;cursor:zoom-in;border:1px solid #d9e1f1}
+ .pvid{width:100%;max-height:300px;border-radius:12px;margin-top:8px;background:#050f2a}
  .price{font-size:1.5rem;font-weight:800}
  .price s{color:#7a89aa;font-size:1.05rem;font-weight:500;margin-right:6px}
  .price .now{color:#16a34a}
  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
  .actions form{margin:0}
- .ctrl{display:flex;align-items:center;gap:10px;margin:8px 0;flex-wrap:wrap}
- .ctrl b{min-width:130px}
- .ctrl .val{min-width:120px;text-align:center;font-weight:700}
- .ctrl input{flex:1;min-width:160px}
- .seller-box{border-top:1px solid #d9e1f1;margin-top:12px;padding-top:6px}
- .overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background-color:rgba(11,31,75,.9);z-index:100;align-items:center;justify-content:center;padding:20px;text-align:center}
- .overbox{max-width:480px;background-color:#ffffff;border-top:6px solid #d90429;border-radius:20px;padding:28px}
+ .lane-head{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+ .lane.won{border:2px solid #d90429}
+ .seller-box{border-top:1px solid #d9e1f1;margin-top:12px;padding-top:10px}
+ .overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(11,31,75,.9);z-index:100;align-items:center;justify-content:center;padding:20px;text-align:center}
+ .overbox{max-width:480px;background:#fff;border-top:6px solid #d90429;border-radius:20px;padding:28px}
  .overbox h1{font-size:2.3rem;margin:0 0 8px}
+ #qlocalwrap{position:absolute;right:10px;bottom:10px;width:34%;border:2px solid #fff;border-radius:10px;overflow:hidden;background:#000}
+ #qlocal{width:100%;display:block}
  @media (max-width:700px){.body{grid-template-columns:1fr}}
 </style>
 
 <div id="cfg" hidden data-race="{{ race.id }}" data-owner="{% if is_owner %}1{% else %}0{% endif %}"
-     data-csrf="{{ csrf_token }}" data-me="{{ request.user.id }}" data-live="{% if race.is_live %}1{% else %}0{% endif %}"></div>
+     data-csrf="{{ csrf_token }}" data-me="{{ request.user.id }}" data-live="{% if race.is_live %}1{% else %}0{% endif %}"
+     data-qsec="{{ quality_seconds }}"></div>
 
 <div class="card">
-  <div class="row"><h2 style="margin:0">🏁 {{ race.product }}</h2><span class="chip">Budget {{ race.budget }}</span></div>
-  <p class="muted">Started at <b id="start"></b> · <span id="cd"></span> · Spots left <b id="slots"></b>/10</p>
+  <div class="row"><h2 style="margin:0">{{ race.product }}</h2><span class="chip">Budget {{ race.budget }}</span></div>
+  <p class="muted" style="margin:.5em 0">
+    Started at <b id="start"></b> · <span id="cd"></span> · Spots left <b id="slots"></b>/10
+    {% if race.location %}<br>📍 Customer location: <b>{{ race.location }}</b>{% endif %}
+  </p>
   {% if is_owner and race.is_live %}
-  <form method="post" action="{% url 'customer_exit' race.id %}" onsubmit="return confirm('Exit this race?')">{% csrf_token %}<button class="btn danger">Exit race</button></form>
+  <div class="row">
+    <button id="qpCustomer" class="btn navy" onclick="openQuality()">👁 View Quality</button>
+    <form method="post" action="{% url 'customer_exit' race.id %}" onsubmit="return confirm('Exit this race?')">{% csrf_token %}<button class="btn danger">Exit race</button></form>
+  </div>
+  <p class="msg-note" id="qpHint">A seller can send you a live 30-second Quality Proof video. This button will light up when one does.</p>
   {% endif %}
   {% if mine and race.is_live %}
-  <form method="post" action="{% url 'seller_leave' race.id %}" onsubmit="return confirm('Leave the race? Everyone will be told you fainted.')">{% csrf_token %}<button class="btn danger">Exit race</button></form>
+  <div class="row">
+    <button class="btn green" onclick="startQualityProof()">🎥 Quality Proof</button>
+    <form method="post" action="{% url 'seller_leave' race.id %}" onsubmit="return confirm('Leave the race?')">{% csrf_token %}<button class="btn danger">Exit race</button></form>
+  </div>
   {% endif %}
 </div>
 
 {% if form %}
 <div class="card">
   <h3>Join this race</h3>
-  <p class="muted">The earlier you join, the faster your animal (Cheetah first, Tortoise last).</p>
+  <p class="muted">Your username is used automatically. Add your offer below.</p>
   <form method="post" enctype="multipart/form-data">{% csrf_token %}{{ form.as_p }}
     <button class="btn green" style="width:100%;margin-top:8px">Enter Race</button></form>
 </div>
@@ -57,7 +62,7 @@
 
 <div id="over" class="overlay" data-initial="{{ end_message }}">
   <div class="overbox">
-    <h1>🏁 GAME OVER</h1>
+    <h1>GAME OVER</h1>
     <p id="overmsg" style="font-size:1.25rem"></p>
     <div class="row" style="justify-content:center">
       <a id="overchat" class="btn navy" href="{{ chat_url }}" {% if not chat_url %}style="display:none"{% endif %}>💬 Open chat</a>
@@ -66,12 +71,61 @@
     </div>
   </div>
 </div>
+
+{% if review_form %}
+<div id="reviewmodal" class="modal show">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>Review {{ review_seller.username }}</h2>
+      <button class="close-x" type="button" onclick="hideReview()">×</button>
+    </div>
+    <form method="post" action="{% url 'review_seller' race.id review_seller.id %}" onsubmit="return checkReview(this)">
+      {% csrf_token %}
+      <div class="modal-body">
+        <p class="muted" style="margin-top:0">How was this seller? Tick at least <b>two</b> options.</p>
+        <div class="review-grid">
+          <label class="review-opt"><input type="checkbox" name="good_quality">{% include "includes/review_icon.html" with icon="quality" %}<span class="lbl">Good Quality</span></label>
+          <label class="review-opt"><input type="checkbox" name="poor_quality">{% include "includes/review_icon.html" with icon="poor" %}<span class="lbl">Poor Quality</span></label>
+          <label class="review-opt"><input type="checkbox" name="comfortable">{% include "includes/review_icon.html" with icon="comfortable" %}<span class="lbl">Comfortable to talk to</span></label>
+          <label class="review-opt"><input type="checkbox" name="reliable">{% include "includes/review_icon.html" with icon="reliable" %}<span class="lbl">Very reliable</span></label>
+          <label class="review-opt"><input type="checkbox" name="fair_price">{% include "includes/review_icon.html" with icon="fair" %}<span class="lbl">Fair Price</span></label>
+          <label class="review-opt"><input type="checkbox" name="unfriendly">{% include "includes/review_icon.html" with icon="angry" %}<span class="lbl">Ufriendly</span></label>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" onclick="hideReview()">Later</button>
+        <button class="btn">Submit review</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<div id="qmodal" class="modal">
+  <div class="modal-box" style="max-width:640px">
+    <div class="modal-head">
+      <h2>🎥 Quality Proof</h2>
+      <span id="qcount" class="chip">30s</span>
+      <button class="close-x" type="button" onclick="closeQuality()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="video-wrap">
+        <video id="qremote" autoplay playsinline></video>
+        <div id="qlocalwrap"><video id="qlocal" autoplay playsinline muted></video></div>
+        <div id="qstatus" class="video-note">Connecting…</div>
+      </div>
+      <p class="msg-note">Live video only — at most 30 seconds, and nothing is recorded.</p>
+    </div>
+    <div class="modal-foot"><button type="button" class="btn danger" onclick="closeQuality()">End video</button></div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 const cfg = document.getElementById('cfg').dataset;
 const RACE_ID = Number(cfg.race), IS_OWNER = cfg.owner === '1', CSRF = cfg.csrf, ME = Number(cfg.me);
+const QSEC = Number(cfg.qsec || 30);
 let live = cfg.live === '1', expires = null, winnerId = null, lastState = null, ws = null;
 let promoDraft = null, promoFocus = false;
 const lanes = document.getElementById('lanes');
@@ -80,6 +134,12 @@ const over = document.getElementById('over');
 function money(v){ return Number(v).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function showOver(msg){ document.getElementById('overmsg').textContent = msg; over.style.display = 'flex'; }
 function hideOver(){ over.style.display = 'none'; }
+function hideReview(){ const m = document.getElementById('reviewmodal'); if (m) m.classList.remove('show'); }
+function checkReview(f){
+  const n = f.querySelectorAll('input[type=checkbox]:checked').length;
+  if (n < 2) { alert('Please tick at least two options.'); return false; }
+  return true;
+}
 function send(o){ if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
 function adj(field, dir){ send({action:'adjust', field:field, dir:dir}); }
 function savePromoItem(){
@@ -97,13 +157,16 @@ function render(s){
     const canChat = IS_OWNER && (live || won);
     return `<div class="card lane ${won ? 'won' : ''}">
       <div class="lane-head">
-        ${p.photo ? `<img class="avatar" src="${esc(p.photo)}">` : '<div class="avatar ph">👤</div>'}
-        <div><b>#${p.slot} ${esc(p.animal)} ${p.emoji}</b><br><span class="muted">${esc(p.name)}</span></div>
+        ${p.photo ? `<img class="avatar" src="${esc(p.photo)}">` : '<div class="avatar ph">' + esc(p.name).slice(0,1).toUpperCase() + '</div>'}
+        <div><b>${esc(p.name)}</b><br><span class="muted">${esc(p.category || 'Seller')}</span></div>
         ${won ? '<span class="chip win">🏆 Winner</span>' : ''}
+        ${!p.media_verified ? '<span class="tag unverified">Unverified media</span>' : ''}
       </div>
-      <div class="track"><div class="runner" style="left:${p.progress * 0.88}%">${p.emoji}<small>${esc(p.name)}</small></div><div class="finish"></div></div>
       <div class="body">
-        <a href="${esc(p.image)}" target="_blank"><img class="pimg" src="${esc(p.image)}"></a>
+        <div>
+          <a href="${esc(p.image)}" target="_blank"><img class="pimg" src="${esc(p.image)}"></a>
+          ${p.video ? `<video class="pvid" src="${esc(p.video)}" controls preload="metadata"></video>` : ''}
+        </div>
         <div>
           <h3 style="margin:0">${esc(p.product)}</h3>
           <div class="price">${hasDisc ? `<s>${money(p.price)}</s>` : ''}<span class="now">${money(p.final_price)}</span>
@@ -125,14 +188,16 @@ function render(s){
         </div>
       </div>
       ${mine && live ? `<div class="seller-box">
-        <div class="ctrl"><b>💸 Discount</b><button class="btn small" onclick="adj('discount',-1)">−</button>
-          <span class="val">${p.discount}%</span><button class="btn small" onclick="adj('discount',1)">+</button></div>
-        <div class="ctrl"><b>🚚 Free delivery</b><button class="btn small" onclick="adj('delivery',-1)">−</button>
-          <span class="val">${p.delivery ? 'ON' : 'OFF'}</span><button class="btn small" onclick="adj('delivery',1)">+</button></div>
-        <div class="ctrl"><b>🎁 Promotion</b><button class="btn small" onclick="adj('promo',-1)">−</button>
-          <span class="val">${p.promo ? 'Buy 1 get ' + p.promo + ' free' : 'None'}</span><button class="btn small" onclick="adj('promo',1)">+</button></div>
-        ${p.promo ? `<div class="ctrl"><b>🎁 Free item</b>
-          <input id="promoItem" maxlength="120" placeholder="Which product is free? (empty = same product)"
+        <div class="flow">
+          <div class="ctrl"><b>💸 Discount</b><button class="btn small minus" onclick="adj('discount',-1)">−</button>
+            <span class="val">${p.discount}%</span><button class="btn small plus" onclick="adj('discount',1)">+</button></div>
+          <div class="ctrl"><b>🚚 Free delivery</b><button class="btn small minus" onclick="adj('delivery',-1)">−</button>
+            <span class="val">${p.delivery ? 'ON' : 'OFF'}</span><button class="btn small plus" onclick="adj('delivery',1)">+</button></div>
+          <div class="ctrl"><b>🎁 Promotion</b><button class="btn small minus" onclick="adj('promo',-1)">−</button>
+            <span class="val">${p.promo ? '1 + ' + p.promo + ' free' : 'None'}</span><button class="btn small plus" onclick="adj('promo',1)">+</button></div>
+        </div>
+        ${p.promo ? `<div class="ctrl" style="display:flex"><b>🎁 Free item</b>
+          <input id="promoItem" maxlength="120" placeholder="Which product is free?"
             value="${esc(promoDraft !== null ? promoDraft : p.promo_item)}"
             oninput="promoDraft=this.value" onfocus="promoFocus=true" onblur="promoFocus=false">
           <button class="btn small navy" onclick="savePromoItem()">Save</button></div>` : ''}
@@ -151,6 +216,19 @@ function render(s){
     const d = JSON.parse(e.data);
     if (d.type === 'state') render(d.state);
     else if (d.type === 'event') { toast(d.message); beep(); notify('The Rat Race', d.message, location.href); }
+    else if (d.type === 'quality_request') {
+      const b = document.getElementById('qpCustomer');
+      if (b){ b.classList.add('qp-glow'); b.textContent = '👁 View Quality — ' + d.seller + ' is live'; }
+      const h = document.getElementById('qpHint');
+      if (h) h.textContent = d.seller + ' is ready to show you a live Quality Proof video. Tap View Quality.';
+      beep();
+      if (navigator.vibrate) navigator.vibrate([180, 90, 180]);
+      toast('🎥 ' + d.seller + ' sent a live Quality Proof');
+    }
+    else if (d.type === 'quality_over') {
+      const b = document.getElementById('qpCustomer');
+      if (b){ b.classList.remove('qp-glow'); b.textContent = '👁 View Quality'; }
+    }
     else if (d.type === 'race_over') {
       live = false; showOver(d.message); notify('Race over', d.message, '/');
       if (d.chat_url && Number(d.winner_user_id) === ME) {
@@ -162,14 +240,137 @@ function render(s){
   ws.onclose = () => { if (live) setTimeout(connect, 2000); };
 })();
 
-// Result popup for everyone who opens a finished race
 if (over.dataset.initial) showOver(over.dataset.initial);
 
 setInterval(() => {
   if (!expires) return;
-  if (!live) { document.getElementById('cd').textContent = '🏁 Race ended'; return; }
+  if (!live) { document.getElementById('cd').textContent = 'Race ended'; return; }
   const s = Math.max(0, Math.floor((expires - Date.now()) / 1000));
-  document.getElementById('cd').textContent = `⏱ ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} left`;
+  document.getElementById('cd').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} left`;
 }, 1000);
+
+/* ---------------- Quality Proof: 30-second live video ---------------- */
+const ICE = { iceServers: [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+] };
+let qws = null, pc = null, localStream = null, qTimer = null, qLeft = QSEC;
+
+function setQStatus(t){ const el = document.getElementById('qstatus'); if (el) el.textContent = t; }
+function qsend(o){ if (qws && qws.readyState === 1) qws.send(JSON.stringify(o)); }
+
+function startQualityProof(){
+  send({ action: 'quality_request' });
+  openQuality();
+}
+
+async function openQuality(){
+  document.getElementById('qmodal').classList.add('show');
+  if (IS_OWNER) {
+    // The customer only watches. The seller is the one who streams.
+    setQStatus('Connecting to the seller…');
+  } else {
+    setQStatus('Starting camera…');
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      document.getElementById('qlocal').srcObject = localStream;
+    } catch (e) {
+      setQStatus('Camera permission is needed to show a live video. Allow camera access and try again.');
+      return;
+    }
+  }
+  connectQuality();
+  startLocalCountdown();
+}
+
+function startLocalCountdown(){
+  clearInterval(qTimer); qLeft = QSEC;
+  const el = document.getElementById('qcount'); if (el) el.textContent = qLeft + 's';
+  qTimer = setInterval(() => {
+    qLeft -= 1;
+    const e = document.getElementById('qcount'); if (e) e.textContent = Math.max(qLeft, 0) + 's';
+    if (qLeft <= 0) { clearInterval(qTimer); endStream(); setQStatus('Time is up — the 30-second video has ended.'); }
+  }, 1000);
+}
+
+function connectQuality(){
+  qws = new WebSocket(`${wsScheme}://${location.host}/ws/quality/${RACE_ID}/`);
+  qws.onopen = () => setQStatus('Connected. Waiting for the other person…');
+  qws.onmessage = async e => {
+    const d = JSON.parse(e.data);
+    if (d.type === 'ready') {
+      setQStatus(d.role === 'seller' ? 'Waiting for the customer to open the video…' : 'Connecting to the seller…');
+      if (d.role === 'customer') qsend({ kind: 'hello' });
+    } else if (d.type === 'peer_join') {
+      setQStatus('The other person joined. Connecting video…');
+      // The customer greets again so a seller who joined late can start the stream.
+      if (IS_OWNER) setTimeout(() => qsend({ kind: 'hello' }), 250);
+    } else if (d.type === 'signal') {
+      await onSignal(d);
+    } else if (d.type === 'peer_left') {
+      setQStatus('The other person left the video.');
+      setTimeout(closeQuality, 1200);
+    } else if (d.type === 'time_up') {
+      clearInterval(qTimer); endStream();
+      setQStatus('Time is up — the 30-second video has ended.');
+      setTimeout(closeQuality, 1400);
+    }
+  };
+  qws.onclose = () => { if (document.getElementById('qmodal').classList.contains('show')) setQStatus('Video connection closed.'); };
+}
+
+function makePC(){
+  pc = new RTCPeerConnection(ICE);
+  pc.onicecandidate = e => { if (e.candidate) qsend({ kind: 'ice', data: e.candidate }); };
+  pc.ontrack = e => { document.getElementById('qremote').srcObject = e.streams[0]; };
+  // Only the seller has a camera track. The customer just receives.
+  if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  pc.onconnectionstatechange = () => {
+    if (['failed', 'disconnected'].includes(pc.connectionState))
+      setQStatus('The video connection dropped. Try again on a stronger network.');
+  };
+}
+
+async function makeOffer(){
+  makePC();
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  qsend({ kind: 'offer', data: offer });
+}
+
+async function onSignal(d){
+  if (d.kind === 'hello') {
+    // Seller answers the customer's greeting with a video offer.
+    if (!IS_OWNER && localStream && !pc) await makeOffer();
+  } else if (d.kind === 'offer') {
+    if (!pc) makePC();
+    await pc.setRemoteDescription(d.data);
+    const ans = await pc.createAnswer();
+    await pc.setLocalDescription(ans);
+    qsend({ kind: 'answer', data: ans });
+  } else if (d.kind === 'answer') {
+    if (pc) await pc.setRemoteDescription(d.data);
+  } else if (d.kind === 'ice') {
+    if (pc) { try { await pc.addIceCandidate(d.data); } catch (e) {} }
+  }
+}
+
+function endStream(){
+  clearInterval(qTimer);
+  if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+  if (pc) { try { pc.close(); } catch (e) {} pc = null; }
+}
+
+function closeQuality(){
+  qsend({ kind: 'hangup' });
+  endStream();
+  if (qws) { try { qws.close(); } catch (e) {} qws = null; }
+  const m = document.getElementById('qmodal'); if (m) m.classList.remove('show');
+  const r = document.getElementById('qremote'); if (r) r.srcObject = null;
+  const l = document.getElementById('qlocal'); if (l) l.srcObject = null;
+}
 </script>
 {% endblock %}

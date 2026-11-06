@@ -1,8 +1,30 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="card narrow">
-  <h2>📷 Seller profile photo</h2>
-  {% if profile.photo %}<img class="avatar" style="width:110px;height:110px" src="{{ profile.photo.url }}">{% endif %}
-  <form method="post" enctype="multipart/form-data">{% csrf_token %}{{ form.as_p }}<button class="btn" style="width:100%;margin-top:8px">Save</button></form>
+<div class="card narrow" style="max-width:560px">
+  <h2 style="margin-top:0">{{ profile.role|capfirst }} profile</h2>
+  <div class="row" style="gap:14px;margin-bottom:8px">
+    {% if profile.photo %}<img class="avatar" style="width:96px;height:96px" src="{{ profile.photo.url }}" alt="">
+    {% else %}<div class="avatar ph" style="width:96px;height:96px;font-size:2rem">{{ user.username|slice:":1"|upper }}</div>{% endif %}
+    <div>
+      <b style="font-size:1.15rem">{{ user.username }}</b><br>
+      {% if profile.category_label %}<span class="chip">{{ profile.category_label }}</span>{% endif %}
+      {% include "includes/badge.html" with badge=profile.badge %}
+    </div>
+  </div>
+  <p class="muted" style="margin-top:0">Your photo and username are shown to customers on the home page and on every race.</p>
+
+  <form method="post" enctype="multipart/form-data">{% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form %}
+      <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+      {{ field }}
+      {% if field.help_text %}<p class="msg-note">{{ field.help_text }}</p>{% endif %}
+      {% for e in field.errors %}<div class="err">{{ e }}</div>{% endfor %}
+    {% endfor %}
+    <button class="btn" style="width:100%;margin-top:16px">Save profile</button>
+  </form>
+  {% if profile.role == 'seller' %}
+  <p style="margin-top:14px"><a href="{% url 'my_posts' %}">🛍 Manage my products and services →</a></p>
+  {% endif %}
 </div>
 {% endblock %}

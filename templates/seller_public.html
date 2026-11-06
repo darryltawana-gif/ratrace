@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+ .pub-head{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+ .pub-head .avatar{width:120px;height:120px;border-width:4px}
+ .pub-head .info{flex:1;min-width:220px}
+ .pub-head h2{margin:0;font-size:1.9rem}
+ .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:14px}
+ .stat{background:#f7f9fe;border:1px solid #e3e9f5;border-radius:12px;padding:10px 12px;text-align:center}
+ .stat b{display:block;font-size:1.35rem;color:#0b1f4b}
+ .stat span{font-size:.78rem;color:#5a6a8c;font-weight:700}
+ .review-line{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 0;border-bottom:1px dashed #e3e9f5}
+ .review-line:last-child{border-bottom:0}
+ .review-line .rv{flex:1;min-width:160px}
+ .handshake{width:20px;height:20px;vertical-align:-3px;margin-right:4px}
+</style>
+
+<a class="btn small ghost" href="{% url 'home' %}">← All sellers</a>
+
+<div class="card">
+  <div class="pub-head">
+    {% if seller.photo %}<img class="avatar" src="{{ seller.photo.url }}" alt="{{ seller.user.username }}">
+    {% else %}<div class="avatar ph" style="width:120px;height:120px;font-size:2.6rem">{{ seller.user.username|slice:":1"|upper }}</div>{% endif %}
+    <div class="info">
+      <h2>{{ seller.user.username }}</h2>
+      <div class="row" style="gap:8px;margin:6px 0">
+        {% if seller.category_label %}<span class="cat" style="font-size:.82rem">{{ seller.category_label }}</span>{% endif %}
+        {% include "includes/badge.html" with badge=seller.badge %}
+        {% if seller.wins %}<span class="chip win">🏆 {{ seller.wins }} wins</span>{% endif %}
+      </div>
+      <p class="muted" style="margin:.4em 0">Trusted by customers through real conversations and honest offers.</p>
+
+      {% if user.is_authenticated and user.id != seller.user_id %}
+      <div class="row">
+        {% if in_circle == 'accepted' %}
+          <span class="chip win">✓ In your Circle</span>
+          <a class="btn small ghost" href="{% url 'my_circle' %}">Open My Circle</a>
+        {% elif in_circle == 'pending' %}
+          <span class="chip">⏳ Circle request pending</span>
+        {% else %}
+          <form method="post" action="{% url 'circle_request' seller.user.id %}" style="margin:0">{% csrf_token %}
+            <button class="btn navy">
+              <svg class="handshake" viewBox="0 0 32 32" aria-hidden="true">
+                <defs><linearGradient id="hsA" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffe0c4"/><stop offset="1" stop-color="#d99a66"/></linearGradient>
+                <linearGradient id="hsB" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd7b5"/><stop offset="1" stop-color="#c98a5f"/></linearGradient></defs>
+                <path d="M3 13 L11 9 L16 13 L11 17 Z" fill="url(#hsA)" stroke="#a06a3a" stroke-width="1"/>
+                <path d="M29 13 L21 9 L16 13 L21 17 Z" fill="url(#hsB)" stroke="#a06a3a" stroke-width="1"/>
+                <path d="M11 12 h10 v5 h-10z" fill="#e0a877" stroke="#a06a3a" stroke-width="1"/>
+                <path d="M3 13 L8 15 M29 13 L24 15" stroke="#0b1f4b" stroke-width="3" stroke-linecap="round"/>
+                <path d="M16 5 l1.6 3.4 3.4 1.6 -3.4 1.6 -1.6 3.4 -1.6-3.4 -3.4-1.6 3.4-1.6z" fill="#fff6c9"/>
+              </svg>
+              Add to My Circle
+            </button>
+          </form>
+        {% endif %}
+        <a class="btn small danger" href="{% url 'report_seller' seller.user.id %}">Report Seller</a>
+      </div>
+      {% elif not user.is_authenticated %}
+      <a class="btn small navy" href="{% url 'login' %}">Login to add to My Circle</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="stat-grid">
+    <div class="stat"><b>{{ counts.good }}</b><span>Good Quality</span></div>
+    <div class="stat"><b>{{ counts.comfortable }}</b><span>Comfortable to talk to</span></div>
+    <div class="stat"><b>{{ counts.reliable }}</b><span>Very reliable</span></div>
+    <div class="stat"><b>{{ counts.fair }}</b><span>Fair Price</span></div>
+  </div>
+</div>
+
+<div class="section-head"><h2>🛍 Products &amp; services</h2><span class="chip">{{ posts|length }} post{{ posts|length|pluralize }}</span></div>
+{% if posts %}
+<div class="seller-grid">
+  {% for p in posts %}
+  <div class="post-card">
+    {% if p.image %}<a href="{{ p.image.url }}" target="_blank"><img src="{{ p.image.url }}" alt="{{ p.title }}"></a>
+    {% elif p.video %}<video src="{{ p.video.url }}" controls preload="metadata"></video>{% endif %}
+    <div class="pc-body">
+      <h4>{{ p.title }}</h4>
+      {% if p.price %}<b style="color:#16a34a">{{ p.price }}</b>{% endif %}
+      <span class="muted" style="font-size:.86rem">{{ p.description|truncatechars:120 }}</span>
+      {% if not p.media_verified %}<span class="tag unverified" style="align-self:flex-start">Unverified media</span>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">This seller has not posted any products yet.</div>
+{% endif %}
+
+<div class="section-head"><h2>⭐ Reviews</h2></div>
+<div class="card">
+  {% for r in reviews %}
+  <div class="review-line">
+    {% include "includes/review_icon.html" with icon="comfortable" %}
+    <div class="rv">
+      <b>{{ r.customer.username }}</b>
+      <div class="row" style="gap:6px;margin-top:4px">
+        {% if r.good_quality %}<span class="chip win">Good Quality</span>{% endif %}
+        {% if r.poor_quality %}<span class="chip">Poor Quality</span>{% endif %}
+        {% if r.comfortable %}<span class="chip win">Comfortable to talk to</span>{% endif %}
+        {% if r.reliable %}<span class="chip win">Very reliable</span>{% endif %}
+        {% if r.fair_price %}<span class="chip win">Fair Price</span>{% endif %}
+        {% if r.unfriendly %}<span class="chip">Ufriendly</span>{% endif %}
+      </div>
+    </div>
+    <small class="muted">{{ r.created|date:"d M Y" }}</small>
+  </div>
+  {% empty %}
+  <p class="muted" style="margin:0">No reviews yet. Reviews are given by customers after a race.</p>
+  {% endfor %}
+</div>
+{% endblock %}

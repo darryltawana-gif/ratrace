@@ -104,11 +104,81 @@
  #notifbar{background-color:#fff0f2;color:#0b1f4b;padding:10px 16px;display:none;border-bottom:1px solid #f3b4c0;font-weight:500}
  #notifbar .btn{margin-left:8px}
  @media (max-width:560px){nav{gap:8px;padding:10px 12px}.btn{padding:10px 15px}}
+
+ /* ---------- Seller directory, badges, My Circle, reviews ---------- */
+ .homecols{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:18px;align-items:start}
+ @media (max-width:920px){.homecols{grid-template-columns:1fr}}
+ .seller-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}
+ .seller-card{background-color:#ffffff;border:1px solid var(--border);border-radius:18px;padding:16px;text-align:center;
+   box-shadow:0 2px 8px rgba(11,31,75,.07);transition:transform .15s,box-shadow .15s;position:relative;display:flex;
+   flex-direction:column;align-items:center;gap:6px;text-decoration:none;color:inherit}
+ .seller-card:hover{transform:translateY(-3px);box-shadow:0 10px 24px rgba(11,31,75,.14);border-color:#b9c7e6}
+ .seller-card .avatar{width:78px;height:78px}
+ .seller-card .nm{font-weight:800;font-size:1.05rem;color:#0b1f4b}
+ .seller-card .cat{font-size:.78rem;font-weight:700;color:#5a6a8c;background:#eef2fb;border:1px solid #d9e1f1;
+   border-radius:999px;padding:2px 10px}
+ .badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:3px 11px;font-size:.76rem;font-weight:800;
+   border:1px solid #d9e1f1;background:#f1f4fa;color:#5a6a8c;letter-spacing:.02em}
+ .badge.platinum{background:linear-gradient(135deg,#f4f7fd,#b8c6de);color:#1e3358;border-color:#9fb1cf;box-shadow:0 1px 0 #fff inset}
+ .badge.gold{background:linear-gradient(135deg,#fff6cf,#e3ac00);color:#5a3b00;border-color:#d8b145}
+ .badge.bronze{background:linear-gradient(135deg,#f8ded0,#b06a2c);color:#4a2408;border-color:#c78a5f}
+ .badge .gem{width:12px;height:12px;display:inline-block}
+ .circle-panel{background:#fff;border:1px solid var(--border);border-radius:18px;padding:16px;position:sticky;top:76px;
+   box-shadow:0 2px 8px rgba(11,31,75,.07)}
+ .circle-panel h3{margin:0 0 10px;display:flex;align-items:center;gap:8px}
+ .circle-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed #e3e9f5;text-decoration:none;color:inherit}
+ .circle-item:last-child{border-bottom:0}
+ .circle-item .avatar{width:40px;height:40px}
+ .circle-item .who{flex:1;min-width:0}
+ .circle-item .who b{display:block;font-size:.92rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .circle-item .who span{font-size:.75rem;color:#5a6a8c}
+ .side-link{display:block;text-align:center;margin-top:12px}
+ .icon3d{display:inline-block;vertical-align:middle;filter:drop-shadow(0 2px 2px rgba(0,0,0,.22))}
+ .review-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+ @media (max-width:560px){.review-grid{grid-template-columns:1fr}}
+ .review-opt{display:flex;align-items:center;gap:10px;border:1.5px solid #c5d0ea;border-radius:12px;padding:11px 12px;
+   cursor:pointer;background:#fff;font-weight:600;transition:border-color .12s,background .12s}
+ .review-opt:has(input:checked){border-color:#d90429;background:#fff5f7}
+ .review-opt input{width:20px;height:20px;accent-color:#d90429;flex:none}
+ .review-opt .lbl{flex:1}
+ .qp-glow{animation:qpglow 1s infinite;box-shadow:0 0 0 0 rgba(217,4,41,.6)}
+ @keyframes qpglow{0%,100%{box-shadow:0 0 0 0 rgba(217,4,41,.55)}50%{box-shadow:0 0 0 12px rgba(217,4,41,0)}}
+ .modal{display:none;position:fixed;inset:0;background:rgba(11,31,75,.72);z-index:200;align-items:center;justify-content:center;padding:16px}
+ .modal.show{display:flex}
+ .modal-box{background:#fff;border-radius:18px;max-width:560px;width:100%;max-height:92vh;overflow:auto;
+   border-top:6px solid #d90429;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+ .modal-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border)}
+ .modal-head h2{margin:0;font-size:1.15rem;flex:1}
+ .modal-body{padding:16px 18px}
+ .modal-foot{padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+ .close-x{background:none;border:0;font-size:1.5rem;line-height:1;cursor:pointer;color:#5a6a8c;padding:4px 8px}
+ .video-wrap{position:relative;background:#050f2a;border-radius:14px;overflow:hidden;aspect-ratio:4/3}
+ .video-wrap video{width:100%;height:100%;object-fit:cover;display:block}
+ .video-timer{position:absolute;top:10px;right:10px;background:rgba(0,0,0,.6);color:#fff;padding:4px 12px;border-radius:999px;
+   font-weight:800;font-variant-numeric:tabular-nums}
+ .video-note{position:absolute;left:10px;bottom:10px;right:10px;color:#d6e0f7;font-size:.82rem;background:rgba(0,0,0,.45);
+   padding:6px 10px;border-radius:8px}
+ .tag{display:inline-block;font-size:.72rem;font-weight:800;border-radius:6px;padding:1px 7px;border:1px solid #d9e1f1;color:#5a6a8c;background:#f1f4fa}
+ .tag.unverified{border-color:#f3b4c0;background:#fff0f2;color:#8a0f2b}
+ .post-card{background:#fff;border:1px solid var(--border);border-radius:16px;overflow:hidden;display:flex;flex-direction:column}
+ .post-card img,.post-card video{width:100%;height:180px;object-fit:cover;background:#eef2fb;display:block}
+ .post-card .pc-body{padding:12px 14px;display:flex;flex-direction:column;gap:4px;flex:1}
+ .post-card .pc-body h4{margin:0;font-size:1rem}
+ .flow{display:grid;gap:10px}
+ .flow .ctrl{display:grid;grid-template-columns:1fr auto auto auto;align-items:center;gap:8px;margin:0;
+   background:#f7f9fe;border:1px solid #e3e9f5;border-radius:12px;padding:10px 12px}
+ @media (max-width:520px){.flow .ctrl{grid-template-columns:1fr auto auto;grid-template-areas:"lab lab lab" "minus val plus";
+   text-align:center}.flow .ctrl b{grid-area:lab}.flow .ctrl .minus{grid-area:minus}.flow .ctrl .val{grid-area:val}.flow .ctrl .plus{grid-area:plus}}
+ .flow .ctrl b{font-weight:700}
+ .flow .ctrl .val{font-weight:800;min-width:78px;text-align:center}
+ .msg-note{font-size:.86rem;color:#5a6a8c;margin:6px 0 0}
 </style>
 </head>
 <body>
 <nav>
-  <a class="brand" href="/">🐀 The Rat Race</a>
+  <a class="brand" href="/"><svg width="22" height="22" viewBox="0 0 24 24" style="vertical-align:-4px;margin-right:4px" aria-hidden="true"><defs><linearGradient id="crownG" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffe27a"/><stop offset=".55" stop-color="#f5c518"/><stop offset="1" stop-color="#c08a00"/></linearGradient></defs><path d="M3 18h18l-1.4-9.2-4.6 3.1L12 5l-3 6.9-4.6-3.1z" fill="url(#crownG)" stroke="#b8860b" stroke-width="1" stroke-linejoin="round"/><circle cx="3" cy="8" r="1.5" fill="#ffe27a"/><circle cx="21" cy="8" r="1.5" fill="#ffe27a"/><circle cx="12" cy="4" r="1.6" fill="#fff3b0"/></svg>The Rat Race</a>
+  {% if user.is_authenticated %}<a href="{% url 'my_circle' %}">🤝 My Circle{% if circle_pending %} <span class="chip win">{{ circle_pending }}</span>{% endif %}</a>{% endif %}
+  {% if role == 'seller' %}<a href="{% url 'my_posts' %}">🛍 My Posts</a>{% endif %}
   <a href="{% url 'comments' %}">Comments</a>
   {% if user.is_authenticated %}
     <a href="{% url 'chat_list' %}">💬 Chats</a>

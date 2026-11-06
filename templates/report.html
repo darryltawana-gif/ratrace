@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card narrow" style="max-width:620px;border-top:6px solid #d90429">
+  <h2 style="margin-top:0">Report {{ seller.username }}</h2>
+  <p class="muted">This is where you report any seller's bad treatment of you. Take a screenshot of the chat when the seller treated you badly and upload it below.</p>
+  <form method="post" enctype="multipart/form-data">{% csrf_token %}
+    {{ form.non_field_errors }}
+    <label for="{{ form.problem.id_for_label }}">{{ form.problem.label }}</label>
+    {{ form.problem }}
+    {% for e in form.problem.errors %}<div class="err">{{ e }}</div>{% endfor %}
+
+    <label for="{{ form.screenshot.id_for_label }}">{{ form.screenshot.label }}</label>
+    {{ form.screenshot }}
+    <p class="msg-note">{{ form.screenshot.help_text }}</p>
+    {% for e in form.screenshot.errors %}<div class="err">{{ e }}</div>{% endfor %}
+
+    <button class="btn" style="width:100%;margin-top:16px">Submit report</button>
+  </form>
+  <p style="margin-top:10px"><a href="{% url 'seller_public' seller.id %}">← Back to seller</a></p>
+</div>
+{% endblock %}

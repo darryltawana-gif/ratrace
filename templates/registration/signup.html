@@ -12,6 +12,20 @@
     {{ form.username }}
     {% for e in form.username.errors %}<div class="err">{{ e }}</div>{% endfor %}
 
+    <div class="row" style="gap:10px;align-items:flex-start">
+      <div style="flex:1;min-width:180px">
+        <label for="id_email">Email address</label>
+        {{ form.email }}
+        {% for e in form.email.errors %}<div class="err">{{ e }}</div>{% endfor %}
+      </div>
+      <div style="flex:1;min-width:180px">
+        <label for="id_phone">Phone number</label>
+        {{ form.phone }}
+        {% for e in form.phone.errors %}<div class="err">{{ e }}</div>{% endfor %}
+      </div>
+    </div>
+    <p class="msg-note">Give us an email address or a phone number — at least one is required. It is stored securely with your account so we can reach you.</p>
+
     <label for="id_password">Password</label>
     {{ form.password }}
     {% for e in form.password.errors %}<div class="err">{{ e }}</div>{% endfor %}

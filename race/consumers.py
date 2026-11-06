@@ -61,10 +61,121 @@ class RaceConsumer(Base):
         elif action == "promo_item":
             ok = await database_sync_to_async(services.set_promo_item)(
                 user, self.race_id, str(content.get("text", "")))
+        elif action == "quality_request":
+            # Seller asks the customer to watch a live Quality Proof video.
+            allowed = await database_sync_to_async(services.can_stream_quality)(user, self.race_id)
+            if allowed:
+                await self.channel_layer.group_send(self.group, {
+                    "type": "relay",
+                    "payload": {"type": "quality_request",
+                                "seller_id": user.id, "seller": user.username}})
         if ok:
             state = await database_sync_to_async(services.race_state)(self.race_id)
             await self.channel_layer.group_send(
                 self.group, {"type": "relay", "payload": {"type": "state", "state": state}})
+
+
+class QualityConsumer(Base):
+    """WebRTC signalling for the 30-second Quality Proof video."""
+    async def connect(self):
+        self.race_id = self.scope["url_route"]["kwargs"]["race_id"]
+        user = self.scope["user"]
+        if not user.is_authenticated:
+            await self.close()
+            return
+        allowed = await database_sync_to_async(services.can_stream_quality)(user, self.race_id)
+        if not allowed:
+            await self.close()
+            return
+        self.group = f"qp_{self.race_id}"
+        self.role = await database_sync_to_async(services.race_role)(user, self.race_id)
+        await self.channel_layer.group_add(self.group, self.channel_name)
+        await self.accept()
+        await self.send_json({"type": "ready", "role": self.role, "seconds": services.QUALITY_SECONDS})
+        await self.channel_layer.group_send(
+            self.group, {"type": "relay", "payload": {"type": "peer_join", "role": self.role}})
+        # The 30-second clock starts when the customer joins to watch.
+        if self.role == "customer":
+            await self.start_timer()
+
+    async def start_timer(self):
+        async def countdown():
+            await asyncio.sleep(services.QUALITY_SECONDS)
+            await self.channel_layer.group_send(
+                self.group, {"type": "relay", "payload": {"type": "time_up"}})
+            await self.channel_layer.group_send(
+                f"race_{self.race_id}",
+                {"type": "relay", "payload": {"type": "quality_over"}})
+        if getattr(self, "timer", None):
+            self.timer.cancel()
+        self.timer = asyncio.create_task(countdown())
+
+    async def disconnect(self, code):
+        if getattr(self, "timer", None):
+            self.timer.cancel()
+        if hasattr(self, "group"):
+            await self.channel_layer.group_send(
+                self.group, {"type": "relay", "payload": {"type": "peer_left", "role": self.role}})
+            await self.channel_layer.group_discard(self.group, self.channel_name)
+
+    async def receive_json(self, content):
+        kind = content.get("kind")   # hello | offer | answer | ice | hangup
+        if kind not in ("hello", "offer", "answer", "ice", "hangup"):
+            return
+        if kind == "hangup":
+            await self.channel_layer.group_send(
+                self.group, {"type": "relay", "payload": {"type": "peer_left", "role": self.role}})
+            return
+        await self.channel_layer.group_send(self.group, {
+            "type": "relay",
+            "payload": {"type": "signal", "kind": kind, "from": self.role,
+                        "data": content.get("data")}})
+
+
+class CircleConsumer(Base):
+    """Group chat for a customer's My Circle."""
+    async def connect(self):
+        self.circle_id = int(self.scope["url_route"]["kwargs"]["circle_id"])
+        user = self.scope["user"]
+        if not user.is_authenticated:
+            await self.close()
+            return
+        circle = await database_sync_to_async(services.get_circle)(self.circle_id)
+        if not circle or not await database_sync_to_async(services.is_circle_member)(circle, user):
+            await self.close()
+            return
+        self.group = f"circle_{self.circle_id}"
+        self.user = user
+        await self.channel_layer.group_add(self.group, self.channel_name)
+        await self.accept()
+        history = await database_sync_to_async(services.circle_history)(self.circle_id)
+        await self.send_json({"type": "history", "messages": history})
+
+    async def disconnect(self, code):
+        if hasattr(self, "group"):
+            await self.channel_layer.group_discard(self.group, self.channel_name)
+
+    async def receive_json(self, content):
+        text = str(content.get("text", "")).strip()[:1000]
+        topic = str(content.get("topic", "other"))
+        if not text:
+            return
+        res = await database_sync_to_async(services.save_circle_message)(
+            self.user, self.circle_id, text, topic)
+        if not res:
+            return
+        await self.channel_layer.group_send(
+            self.group, {"type": "relay", "payload": {"type": "message", "message": res["message"]}})
+        # Wake up accepted members who are elsewhere on the site.
+        recipients = await database_sync_to_async(services.circle_recipient_ids)(
+            self.circle_id, exclude=self.user.id)
+        for uid in recipients:
+            await self.channel_layer.group_send(
+                f"user_{uid}",
+                {"type": "relay", "payload": {
+                    "type": "chat_message", "room_id": self.circle_id,
+                    "message": f"👥 {self.user.username}: {text[:80]}",
+                    "url": f"/circle/chat/{self.circle_id}/"}})
 
 
 class ChatConsumer(Base):

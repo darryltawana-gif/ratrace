@@ -6,7 +6,7 @@ from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.db import transaction
-from django.db.models import F, Max, Q
+from django.db.models import F, Q, Max
 from django.http import JsonResponse, HttpResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse
@@ -14,8 +14,11 @@ from django.utils import timezone
 from django.views.decorators.cache import cache_control
 from django.views.decorators.http import require_POST
 
-from .forms import RaceForm, JoinForm, ProfileForm, CommentForm, SignupForm
-from .models import Race, Participant, Profile, ChatRoom, PushSubscription, ANIMALS, RACE_MINUTES
+from .forms import (RaceForm, JoinForm, ProfileForm, CommentForm, SignupForm,
+                    PostForm, CircleMessageForm, ReviewForm, ReportForm)
+from .models import (Race, Participant, Profile, Post, Circle, CircleMember,
+                     CircleMessage, Review, Report, Comment, ChatRoom,
+                     PushSubscription, CIRCLE_TOPICS, CATEGORY_LABELS, RACE_MINUTES)
 from . import services as sv
 
 
@@ -33,25 +36,42 @@ def ensure_role(request, role):
 
 def home(request):
     sv.expire_races()
-    animals = []
-    for i, (name, emoji) in enumerate(ANIMALS, 1):
-        text = ("1st to enter the race: the fastest responder!" if i == 1
-                else "Last to enter: the slowest responder." if i == 10
-                else f"Rank #{i} responder")
-        animals.append({"rank": i, "name": name, "emoji": emoji, "text": text})
-    hall = Profile.objects.filter(wins__gte=5).select_related("user").order_by("-wins")[:20]
-    winners = Race.objects.filter(status="won", winner__isnull=False).select_related(
-        "winner__seller__profile").order_by("-started_at")[:6]
-    return render(request, "home.html", {"animals": animals, "hall": hall, "winners": winners})
+    sellers = sv.annotated_sellers()
+
+    circle = None
+    circle_members = []
+    circle_pending = []
+    seller_circles = []
+    deals = []
+    if request.user.is_authenticated:
+        profile = sv.get_profile(request.user)
+        if profile.role == "customer":
+            circle = sv.ensure_circle(request.user)
+            circle_members = [sv.circle_member_dict(m) for m in circle.accepted_members()]
+            circle_pending = circle.members.filter(status="pending").count()
+        elif profile.role == "seller":
+            seller_circles = sv.circle_for_seller(request.user)
+            circle_pending = sv.pending_requests(request.user).count()
+            deals = sv.recent_deals(request.user)
+
+    hall = [p for p in sellers if p.hall_of_fame]
+    return render(request, "home.html", {
+        "sellers": sellers, "hall": hall, "categories": CATEGORY_LABELS,
+        "circle": circle, "circle_members": circle_members,
+        "circle_pending": circle_pending, "seller_circles": seller_circles,
+        "deals": deals,
+    })
 
 
 def signup(request):
-    # Signed-in users may also create another account: it simply switches them to the new one.
     form = SignupForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         cd = form.cleaned_data
         user = User.objects.create_user(username=cd["username"], password=cd["password"])
-        sv.get_profile(user)
+        profile = sv.get_profile(user)
+        profile.email = (cd.get("email") or "").strip()
+        profile.phone = (cd.get("phone") or "").strip()
+        profile.save(update_fields=["email", "phone"])
         login(request, user)
         messages.success(request, f"Welcome, {user.username}! Choose below how you want to use The Rat Race.")
         return redirect("home")
@@ -65,7 +85,6 @@ def set_role(request, role):
         return redirect("home")
     p = sv.get_profile(request.user)
 
-    # Cancel the current mode -> always go to the home page, which shows both options
     if role == "none":
         busy = (Race.objects.filter(customer=request.user, status="open", expires_at__gt=timezone.now()).exists()
                 or Participant.objects.filter(seller=request.user, active=True, race__status="open",
@@ -83,8 +102,10 @@ def set_role(request, role):
     if p.role in ("none", role):
         p.role = role
         p.save()
-        if role == "seller" and not p.photo:
-            messages.info(request, "Add your profile photo to continue. It identifies you in every race, so you only do this once.")
+        if role == "customer":
+            sv.ensure_circle(request.user)
+        if role == "seller" and (not p.photo or not p.category):
+            messages.info(request, "Add your profile photo and choose the category you sell in.")
             return redirect("profile")
     else:
         messages.error(request, f"Cancel {p.role} mode first.")
@@ -96,6 +117,7 @@ def customer_start(request):
     sv.expire_races()
     if not ensure_role(request, "customer"):
         return redirect("home")
+    sv.ensure_circle(request.user)
     existing = Race.objects.filter(customer=request.user, status="open", expires_at__gt=timezone.now()).first()
     if existing:
         return redirect("race_room", existing.id)
@@ -131,7 +153,6 @@ def race_room(request, race_id):
             if not ensure_role(request, "seller"):
                 return redirect("home")
             with transaction.atomic():
-                # Lock the race row so a double click can never create two entries
                 locked = Race.objects.select_for_update().get(pk=race.pk)
                 if locked.participants.filter(seller=request.user, active=True).exists():
                     messages.info(request, "You are already in this race.")
@@ -149,23 +170,34 @@ def race_room(request, race_id):
                     prof.save(update_fields=["photo"])
                 p = form.save(commit=False)
                 p.race, p.seller, p.slot = locked, request.user, slot
+                p.display_name = request.user.username
+                p.product_name = locked.product
+                p.media_verified = form.media_verified
                 p.save()
             sv.broadcast(f"race_{race.id}", {"type": "state", "state": sv.race_state(race.id)})
             sv.broadcast(f"race_{race.id}", {"type": "event",
-                                             "message": f"{p.display_name} entered as the {p.animal[0]} {p.animal[1]}"})
+                                             "message": f"{p.display_name} entered the race"})
             sv.broadcast("lobby", {"type": "slots_changed", "silent": True})
             return redirect("race_room", race.id)
 
-    # Link to the winner chat (for the customer and for the winning seller)
     chat_url = ""
     if race.status == "won" and race.winner and (is_owner or race.winner.seller_id == request.user.id):
         room, _ = sv.get_room(race, race.winner.seller)
         chat_url = reverse("chat_room", args=[room.id])
 
+    # Review popup: the customer is asked to review the winner once.
+    review_form = None
+    if (race.status == "won" and race.winner and is_owner
+            and not sv.has_reviewed(race, request.user, race.winner.seller)):
+        review_form = ReviewForm()
+
     return render(request, "race_room.html", {
         "race": race, "is_owner": is_owner, "mine": mine, "form": form, "profile": profile,
-        "chat_url": chat_url,
-        "end_message": sv.end_message(race) if race.status != "open" else ""})
+        "chat_url": chat_url, "review_form": review_form,
+        "review_seller": race.winner.seller if race.winner else None,
+        "end_message": sv.end_message(race) if race.status != "open" else "",
+        "quality_seconds": sv.QUALITY_SECONDS,
+    })
 
 
 @require_POST
@@ -209,13 +241,12 @@ def pick_winner(request, race_id, pid):
     race.save()
     Profile.objects.filter(user=p.seller).update(wins=F("wins") + 1)
 
-    # Open a chat with the winner and tell them
     room, _ = sv.get_room(race, p.seller)
     sv.system_message(room, f"🏆 {request.user.username} chose {p.display_name} as the winner of “{race.product}”. "
                             f"Chat here to arrange the deal.")
     chat_url = reverse("chat_room", args=[room.id])
 
-    sv.broadcast(f"race_{race.id}", {"type": "race_over", "message": f"🏆 {p.display_name} the {p.animal[0]} won the race!",
+    sv.broadcast(f"race_{race.id}", {"type": "race_over", "message": f"🏆 {p.display_name} won the race!",
                                      "winner_user_id": p.seller_id, "chat_url": chat_url})
     sv.broadcast("lobby", {"type": "race_ended", "race_id": race.id,
                            "message": f"{p.display_name} won the race for “{race.product}”!"})
@@ -237,11 +268,43 @@ def seller_leave(request, race_id):
         p.save()
     if entries:
         p = entries[0]
-        sv.broadcast(f"race_{race_id}", {"type": "event", "message": f"😵 {p.display_name} the {p.animal[0]} fainted in the race!"})
+        sv.broadcast(f"race_{race_id}", {"type": "event", "message": f"{p.display_name} left the race."})
         sv.broadcast(f"race_{race_id}", {"type": "state", "state": sv.race_state(race_id)})
         sv.broadcast("lobby", {"type": "slots_changed",
                                "message": f"A spot opened in the race for “{p.race.product}”. Jump in!"})
     return redirect("home")
+
+
+# ------------------------------- Reviews -------------------------------
+
+@login_required
+def review_seller(request, race_id, seller_id):
+    race = get_object_or_404(Race, pk=race_id, customer=request.user)
+    seller = get_object_or_404(User, pk=seller_id)
+    if not race.participants.filter(seller=seller).exists():
+        messages.error(request, "That seller was not in this race.")
+        return redirect("home")
+    existing = Review.objects.filter(race=race, seller=seller).first()
+    initial = None
+    if existing:
+        initial = {key: getattr(existing, key) for key in
+                   ("good_quality", "poor_quality", "comfortable", "reliable",
+                    "fair_price", "unfriendly")}
+    form = ReviewForm(request.POST or None, initial=initial)
+    if request.method == "POST" and form.is_valid():
+        Review.objects.update_or_create(
+            race=race, seller=seller,
+            defaults={"customer": request.user, **{k: form.cleaned_data[k] for k in
+                                                   ("good_quality", "poor_quality", "comfortable",
+                                                    "reliable", "fair_price", "unfriendly")}})
+        messages.success(request, f"Thank you! Your review of {seller.username} was saved.")
+        nxt = request.POST.get("next") or "home"
+        if nxt == "chat":
+            room, _ = sv.get_room(race, seller)
+            return redirect("chat_room", room.id)
+        return redirect("race_room", race.id)
+    return render(request, "review.html", {"form": form, "race": race, "seller": seller,
+                                           "existing": existing, "next": request.GET.get("next", "")})
 
 
 # ------------------------------- Chat -------------------------------
@@ -280,7 +343,8 @@ def chat_list(request):
         last = r.messages.order_by("-created", "-id").first()
         items.append({"room": r, "name": sv.display_name(other, r.race),
                       "photo": prof.photo.url if prof.photo else "", "last": last})
-    return render(request, "chat_list.html", {"items": items})
+    circles = sv.circle_for_seller(request.user)
+    return render(request, "chat_list.html", {"items": items, "seller_circles": circles})
 
 
 @login_required
@@ -293,10 +357,14 @@ def chat_room(request, room_id):
     other = room.seller if is_customer else room.customer
     prof = sv.get_profile(other)
     offer = Participant.objects.filter(race=room.race, seller=room.seller).order_by("-id").first()
+    can_review = (is_customer and room.race.status == "won" and room.race.winner
+                  and room.race.winner.seller_id == room.seller_id
+                  and not sv.has_reviewed(room.race, request.user, room.seller))
     return render(request, "chat_room.html", {
         "room": room, "race": room.race, "offer": offer, "is_customer": is_customer,
         "other_name": sv.display_name(other, room.race),
-        "other_photo": prof.photo.url if prof.photo else ""})
+        "other_photo": prof.photo.url if prof.photo else "",
+        "other_id": other.id, "can_review": can_review})
 
 
 # ------------------------------- Push alerts -------------------------------
@@ -332,19 +400,192 @@ def push_test(request):
 
 
 # ------------------------------- Other pages -------------------------------
+# ------------------------------- Profile & seller pages -------------------------------
 
 @login_required
-def seller_profile(request):
-    if not ensure_role(request, "seller"):
-        return redirect("home")
+def profile(request):
     profile = sv.get_profile(request.user)
     form = ProfileForm(request.POST or None, request.FILES or None, instance=profile)
     if request.method == "POST" and form.is_valid():
-        form.save()
-        messages.success(request, "Profile photo saved. You're ready to enter races!")
-        return redirect("home")
+        if profile.role == "seller" and not form.cleaned_data.get("category"):
+            form.add_error("category", "Please choose the category you sell in.")
+        else:
+            form.save()
+            messages.success(request, "Profile saved.")
+            return redirect("home")
     return render(request, "profile.html", {"form": form, "profile": profile})
 
+
+def seller_public(request, user_id):
+    profile = get_object_or_404(Profile.objects.select_related("user"),
+                                user__id=user_id, role="seller")
+    posts = sv.seller_posts(profile.user)
+    counts = profile._counts()
+    reviews = profile.user.reviews_received.select_related("customer").order_by("-created")[:20]
+    in_circle = ""
+    if request.user.is_authenticated and request.user.id != profile.user_id:
+        member = CircleMember.objects.filter(circle__customer=request.user, seller=profile.user).first()
+        in_circle = member.status if member else ""
+    return render(request, "seller_public.html", {
+        "seller": profile, "posts": posts, "counts": counts, "reviews": reviews,
+        "in_circle": in_circle, "categories": CATEGORY_LABELS})
+
+
+@login_required
+def my_posts(request):
+    profile = sv.get_profile(request.user)
+    if profile.role != "seller":
+        messages.error(request, "Only sellers can post products.")
+        return redirect("home")
+    posts = sv.seller_posts(request.user, include_inactive=True)
+    return render(request, "posts.html", {"posts": posts})
+
+
+@login_required
+def post_create(request):
+    profile = sv.get_profile(request.user)
+    if profile.role != "seller":
+        messages.error(request, "Only sellers can post products.")
+        return redirect("home")
+    form = PostForm(request.POST or None, request.FILES or None)
+    if request.method == "POST" and form.is_valid():
+        post = form.save(commit=False)
+        post.seller = request.user
+        post.media_verified = form.media_verified
+        post.save()
+        messages.success(request, "Your post is live.")
+        return redirect("my_posts")
+    return render(request, "post_form.html", {"form": form})
+
+
+@require_POST
+@login_required
+def post_delete(request, post_id):
+    post = get_object_or_404(Post, pk=post_id, seller=request.user)
+    post.active = False
+    post.save(update_fields=["active"])
+    messages.info(request, "Post removed.")
+    return redirect("my_posts")
+
+
+# ------------------------------- My Circle -------------------------------
+
+@login_required
+def my_circle(request):
+    profile = sv.get_profile(request.user)
+    if profile.role == "customer":
+        circle = sv.ensure_circle(request.user)
+        members = [sv.circle_member_dict(m) for m in circle.accepted_members()]
+        pending = [sv.circle_member_dict(m) for m in circle.members.filter(status="pending")
+                   .select_related("seller__profile")]
+        sellers = sv.annotated_sellers().exclude(user=request.user)
+        in_circle_ids = set(circle.members.values_list("seller_id", flat=True))
+        suggestions = [s for s in sellers if s.user_id not in in_circle_ids]
+        return render(request, "circle.html", {
+            "mode": "customer", "circle": circle, "members": members,
+            "pending": pending, "suggestions": suggestions, "topics": CIRCLE_TOPICS,
+        })
+
+    # Seller: every circle they belong to, plus requests waiting for an answer.
+    circles = sv.circle_for_seller(request.user)
+    pending = sv.pending_requests(request.user)
+    deals = sv.recent_deals(request.user)
+    return render(request, "circle.html", {
+        "mode": "seller", "circles": circles, "pending": pending, "deals": deals,
+    })
+
+
+@require_POST
+@login_required
+def circle_request(request, seller_id):
+    if sv.get_profile(request.user).role != "customer":
+        messages.error(request, "Only customers build a Circle.")
+        return redirect("home")
+    seller = get_object_or_404(Profile, user__id=seller_id, role="seller").user
+    if seller.id == request.user.id:
+        return redirect("home")
+    circle = sv.ensure_circle(request.user)
+    member, created = CircleMember.objects.get_or_create(circle=circle, seller=seller)
+    if not created and member.status == "accepted":
+        messages.info(request, f"{seller.username} is already in your Circle.")
+    elif not created and member.status == "pending":
+        messages.info(request, "Your request is still waiting for the seller to answer.")
+    else:
+        member.status = "pending"
+        member.save(update_fields=["status"])
+        sv.broadcast(f"user_{seller.id}", {"type": "chat_request", "room_id": 0,
+                                          "url": reverse("my_circle"),
+                                          "message": f"🤝 {request.user.username} wants to add you to their Circle."})
+        messages.success(request, f"Request sent to {seller.username}.")
+    return redirect("seller_public", seller.id)
+
+
+@require_POST
+@login_required
+def circle_respond(request, member_id, action):
+    member = get_object_or_404(CircleMember, pk=member_id, seller=request.user, status="pending")
+    if action not in ("accept", "decline"):
+        return redirect("my_circle")
+    member.status = "accepted" if action == "accept" else "declined"
+    member.responded = timezone.now()
+    member.save(update_fields=["status", "responded"])
+    label = "added you to their Circle" if action == "accept" else "declined your Circle request"
+    sv.broadcast(f"user_{member.circle.customer_id}", {
+        "type": "chat_request", "room_id": 0, "url": reverse("my_circle"),
+        "message": f"🤝 {request.user.username} {label}."})
+    messages.success(request, "Circle request answered.")
+    return redirect("my_circle")
+
+
+@login_required
+def circle_chat(request, circle_id):
+    circle = get_object_or_404(Circle.objects.select_related("customer__profile"), pk=circle_id)
+    if not sv.is_circle_member(circle, request.user):
+        messages.error(request, "That Circle isn't yours.")
+        return redirect("home")
+    members = [sv.circle_member_dict(m) for m in circle.accepted_members()]
+    is_owner = circle.customer_id == request.user.id
+    return render(request, "circle_chat.html", {
+        "circle": circle, "members": members, "is_owner": is_owner,
+        "topics": CIRCLE_TOPICS, "circle_id": circle.id,
+    })
+
+
+@require_POST
+@login_required
+def circle_talk(request, circle_id):
+    circle = get_object_or_404(Circle, pk=circle_id, customer=request.user)
+    topic = request.POST.get("topic", "other")
+    label = dict(CIRCLE_TOPICS).get(topic, "Any other talks")
+    msg = CircleMessage.objects.create(
+        circle=circle, sender=request.user, topic=topic,
+        text=f"Let's talk: {label}.")
+    sv.broadcast(f"circle_{circle.id}",
+                 {"type": "message", "message": sv.circle_message_dict(msg)})
+    for uid in sv.circle_recipient_ids(circle.id, exclude=request.user.id):
+        sv.broadcast(f"user_{uid}", {"type": "chat_message", "room_id": circle.id,
+                                     "message": f"👥 {request.user.username} started a topic: {label}",
+                                     "url": reverse("circle_chat", args=[circle.id])})
+    return redirect("circle_chat", circle.id)
+
+
+# ------------------------------- Reports -------------------------------
+
+@login_required
+def report_seller(request, seller_id):
+    seller = get_object_or_404(Profile, user__id=seller_id, role="seller").user
+    form = ReportForm(request.POST or None, request.FILES or None)
+    if request.method == "POST" and form.is_valid():
+        Report.objects.create(
+            seller=seller, reporter=request.user,
+            problem=form.cleaned_data["problem"],
+            screenshot=form.cleaned_data.get("screenshot"))
+        messages.success(request, "Your report has been sent to the Rat Race team. Thank you.")
+        return redirect("seller_public", seller.id)
+    return render(request, "report.html", {"form": form, "seller": seller})
+
+
+# ------------------------------- Other pages -------------------------------
 
 def comments(request):
     form = CommentForm(request.POST or None)
@@ -352,7 +593,7 @@ def comments(request):
         form.save()
         messages.success(request, "Thank you for your comment!")
         return redirect("comments")
-    return render(request, "comments.html", {"form": form})
+    return render(request, "comments.html", {"form": form, "items": Comment.objects.all()[:50]})
 
 
 def api_live(request):
@@ -411,7 +652,8 @@ def manifest(request):
         "name": "The Rat Race", "short_name": "RatRace", "start_url": "/", "scope": "/",
         "display": "standalone", "background_color": "#0b1f4b", "theme_color": "#0b1f4b",
         "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
-                  {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}]})
+                  {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+                  {"src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml"}]})
 
 
 @cache_control(max_age=86400, public=True)

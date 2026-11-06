@@ -31,6 +31,7 @@
     <a class="btn small ghost" href="{% url 'chat_list' %}">← Chats</a>
     {% if other_photo %}<img class="avatar" src="{{ other_photo }}" alt="">{% else %}<div class="avatar ph" style="background-color:#ffffff">👤</div>{% endif %}
     <div class="who"><b>{{ other_name }}</b><span>About “{{ race.product }}”</span></div>
+    {% if can_review %}<a class="btn small" href="{% url 'review_seller' race.id other_id %}?next=chat">⭐ Review seller</a>{% endif %}
     <span id="status" class="chip">Connecting…</span>
   </div>
 

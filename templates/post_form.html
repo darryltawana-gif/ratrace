@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card narrow">
+  <h2>New post</h2>
+  <p class="muted">Add a real photo or a short video taken with your phone. AI-generated media is rejected.</p>
+  <form method="post" enctype="multipart/form-data">{% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form %}
+      <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+      {{ field }}
+      {% if field.help_text %}<p class="msg-note">{{ field.help_text }}</p>{% endif %}
+      {% for e in field.errors %}<div class="err">{{ e }}</div>{% endfor %}
+    {% endfor %}
+    <button class="btn" style="width:100%;margin-top:16px">Publish post</button>
+  </form>
+  <p style="margin-top:12px"><a href="{% url 'my_posts' %}">← Back to my posts</a></p>
+</div>
+{% endblock %}

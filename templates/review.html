@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card narrow" style="max-width:620px">
+  <h2 style="margin-top:0">Review {{ seller.username }}</h2>
+  <p class="muted">Tick at least <b>two</b> options that describe this seller.</p>
+  {% if existing %}<div class="msg">You already reviewed this seller — saving again updates your review.</div>{% endif %}
+
+  <form method="post">{% csrf_token %}
+    <input type="hidden" name="next" value="{{ next }}">
+    {% if form.non_field_errors %}<div class="msg error">{{ form.non_field_errors }}</div>{% endif %}
+    <div class="review-grid">
+      <label class="review-opt"><input type="checkbox" name="good_quality" {% if form.good_quality.value %}checked{% endif %}>
+        {% include "includes/review_icon.html" with icon="quality" %}<span class="lbl">Good Quality</span></label>
+      <label class="review-opt"><input type="checkbox" name="poor_quality" {% if form.poor_quality.value %}checked{% endif %}>
+        {% include "includes/review_icon.html" with icon="poor" %}<span class="lbl">Poor Quality</span></label>
+      <label class="review-opt"><input type="checkbox" name="comfortable" {% if form.comfortable.value %}checked{% endif %}>
+        {% include "includes/review_icon.html" with icon="comfortable" %}<span class="lbl">Comfortable to talk to</span></label>
+      <label class="review-opt"><input type="checkbox" name="reliable" {% if form.reliable.value %}checked{% endif %}>
+        {% include "includes/review_icon.html" with icon="reliable" %}<span class="lbl">Very reliable</span></label>
+      <label class="review-opt"><input type="checkbox" name="fair_price" {% if form.fair_price.value %}checked{% endif %}>
+        {% include "includes/review_icon.html" with icon="fair" %}<span class="lbl">Fair Price</span></label>
+      <label class="review-opt"><input type="checkbox" name="unfriendly" {% if form.unfriendly.value %}checked{% endif %}>
+        {% include "includes/review_icon.html" with icon="angry" %}<span class="lbl">Ufriendly</span></label>
+    </div>
+    <button class="btn" style="width:100%;margin-top:16px">Submit review</button>
+  </form>
+  <p style="margin-top:10px"><a href="{% url 'race_room' race.id %}">← Back to the race</a></p>
+</div>
+{% endblock %}
