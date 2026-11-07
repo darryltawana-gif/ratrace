@@ -5,3 +5,7 @@ staticfiles/
 __pycache__/
 *.pyc
 .env
+# Local notes must never be committed
+Notes.md
+.env.*
+!.env.example

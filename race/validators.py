@@ -91,6 +91,19 @@ def inspect_image(f):
     return bool(verified)
 
 
+def _video_container(head):
+    """Return a friendly container name for common phone video formats."""
+    if len(head) >= 12 and head[4:8] == b"ftyp":
+        return "MP4/MOV"
+    if head.startswith(b"\x1aE\xdf\xa3"):
+        return "WebM"
+    if head.startswith(b"RIFF") and head[8:12] == b"AVI ":
+        return "AVI"
+    if head.startswith(b"\x00\x00\x01\xba") or head.startswith(b"\x00\x00\x01\xb3"):
+        return "MPEG"
+    return ""
+
+
 def inspect_video(f):
     """Validate an uploaded video. Returns True when it looks camera-original."""
     if f.size > MAX_VIDEO_BYTES:
@@ -102,4 +115,7 @@ def inspect_video(f):
     if any(sig in low for sig in AI_SIGNATURES):
         raise ValidationError(
             "This looks like an AI-generated video. Please upload a real video recorded with your phone.")
+    if not _video_container(head):
+        raise ValidationError(
+            "That file is not a video. Please record a real video with your phone camera.")
     return False   # video metadata is not reliable enough to mark as verified

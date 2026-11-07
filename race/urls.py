@@ -26,6 +26,7 @@ urlpatterns = [
     path("circle/chat/<int:circle_id>/", views.circle_chat, name="circle_chat"),
     path("circle/talk/<int:circle_id>/", views.circle_talk, name="circle_talk"),
     path("report/<int:seller_id>/", views.report_seller, name="report_seller"),
+    path("reports/<int:report_id>/screenshot/", views.report_screenshot, name="report_screenshot"),
     path("comments/", views.comments, name="comments"),
     path("api/live-races/", views.api_live, name="api_live"),
     path("push/subscribe/", views.push_subscribe, name="push_subscribe"),

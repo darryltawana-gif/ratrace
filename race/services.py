@@ -1,6 +1,8 @@
 import json
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -11,7 +13,8 @@ from django.utils import timezone
 
 from .models import (Race, Participant, Profile, ChatRoom, ChatMessage,
                      Post, Circle, CircleMember, CircleMessage, PushSubscription,
-                     MAX_SELLERS, RACE_MINUTES, POSITIVE_OPTIONS)
+                     AccountGroup, AccountIdentity, QualitySession,
+                     MAX_SELLERS, RACE_MINUTES, CIRCLE_TOPIC_KEYS)
 
 log = logging.getLogger(__name__)
 MAX_DISCOUNT = 50
@@ -26,6 +29,72 @@ def get_profile(user):
     return Profile.objects.get_or_create(user=user)[0]
 
 
+# ------------------------------- Account linking -------------------------------
+
+def normalize_email(value):
+    return (value or "").strip().lower()
+
+
+def normalize_phone(value):
+    """Keep a comparable phone form: +263771234567 and 0771234567 differ,
+    but spaces, dashes and brackets are ignored."""
+    raw = (value or "").strip()
+    if raw.startswith("00"):
+        raw = "+" + raw[2:]
+    return re.sub(r"[^\d+]", "", raw)
+
+
+def link_account(profile, email="", phone="", device=""):
+    """Put this profile in the shared group of the same email/phone/device.
+
+    The function never merges people just because they share a username; only
+    contact details or the same sign-up browser create a link.
+    """
+    pairs = []
+    email = normalize_email(email)
+    phone = normalize_phone(phone)
+    device = (device or "").strip()
+    if email:
+        pairs.append(("email", email))
+    if phone:
+        pairs.append(("phone", phone))
+    if device:
+        pairs.append(("device", device))
+
+    groups = []
+    if profile.account_group_id:
+        groups.append(profile.account_group)
+    for kind, value in pairs:
+        ident = AccountIdentity.objects.select_related("group").filter(kind=kind, value=value).first()
+        if ident:
+            groups.append(ident.group)
+
+    if groups:
+        group = groups[0]
+    else:
+        group = AccountGroup.objects.create(label=profile.user.username)
+
+    # If the clues point at several groups, merge them into one.
+    for other in {g.pk: g for g in groups}.values():
+        if other.pk == group.pk:
+            continue
+        Profile.objects.filter(account_group=other).update(account_group=group)
+        AccountIdentity.objects.filter(group=other).update(group=group)
+        AccountGroup.objects.filter(pk=other.pk).delete()
+
+    if profile.account_group_id != group.pk:
+        profile.account_group = group
+        profile.save(update_fields=["account_group"])
+
+    for kind, value in pairs:
+        identity, created = AccountIdentity.objects.get_or_create(
+            kind=kind, value=value, defaults={"group": group})
+        if not created and identity.group_id != group.pk:
+            identity.group = group
+            identity.save(update_fields=["group"])
+    return group
+
+
 def display_name(user, race):
     """The name a seller uses in a race (falls back to the username)."""
     p = Participant.objects.filter(race=race, seller=user).order_by("-id").first()
@@ -33,8 +102,8 @@ def display_name(user, race):
 
 
 def lobby_race(r):
+    # No customer location here: this payload is visible to everyone on the site.
     return {"id": r.id, "product": r.product, "budget": str(r.budget),
-            "location": r.location,
             "started_at": r.started_at.isoformat(), "expires_at": r.expires_at.isoformat(),
             "slots_left": MAX_SELLERS - r.participants.filter(active=True).count()}
 
@@ -227,6 +296,8 @@ def save_circle_message(user, circle_id, text, topic="other"):
     circle = Circle.objects.filter(pk=circle_id).first()
     if not circle or not is_circle_member(circle, user):
         return None
+    if topic not in CIRCLE_TOPIC_KEYS:
+        topic = "other"
     m = CircleMessage.objects.create(circle=circle, sender=user, text=text[:1000], topic=topic)
     return {"message": circle_message_dict(m)}
 
@@ -246,6 +317,15 @@ def circle_recipient_ids(circle_id, exclude=None):
 
 # ------------------------------- Quality Proof video -------------------------------
 
+def race_access(user, race_id):
+    """Only the customer who owns the race or an active seller in it may watch it."""
+    if not getattr(user, "is_authenticated", False):
+        return False
+    return Race.objects.filter(pk=race_id).filter(
+        Q(customer=user) | Q(participants__seller=user, participants__active=True)
+    ).exists()
+
+
 def can_stream_quality(user, race_id):
     race = Race.objects.filter(pk=race_id, status="open", expires_at__gt=timezone.now()).first()
     if not race:
@@ -258,6 +338,42 @@ def can_stream_quality(user, race_id):
 def race_role(user, race_id):
     race = Race.objects.get(pk=race_id)
     return "customer" if race.customer_id == user.id else "seller"
+
+
+def start_quality_session(user, race_id):
+    """Start (or resume) the single 30-second proof this seller gets per race."""
+    race = Race.objects.filter(pk=race_id, status="open", expires_at__gt=timezone.now()).first()
+    if not race or not race.participants.filter(seller=user, active=True).exists():
+        return None
+    session, created = QualitySession.objects.get_or_create(
+        race=race, seller=user, defaults={"started_at": timezone.now()})
+    if created:
+        return session
+    # A previous proof was already used or has run out: do not restart it.
+    if session.ended_at or session.started_at <= timezone.now() - timedelta(seconds=QUALITY_SECONDS):
+        if not session.ended_at:
+            session.ended_at = timezone.now()
+            session.save(update_fields=["ended_at"])
+        return None
+    return session
+
+
+def quality_for_race(race_id, seller_id=None):
+    """The live proof window for a race (optionally for one seller)."""
+    cutoff = timezone.now() - timedelta(seconds=QUALITY_SECONDS)
+    qs = QualitySession.objects.filter(
+        race_id=race_id, ended_at__isnull=True, started_at__gt=cutoff)
+    if seller_id is not None:
+        qs = qs.filter(seller_id=seller_id)
+    return qs.select_related("seller").order_by("-started_at").first()
+
+
+def quality_seconds_left(session):
+    return session.seconds_left() if session else 0
+
+
+def end_quality_session(session_id):
+    QualitySession.objects.filter(pk=session_id, ended_at__isnull=True).update(ended_at=timezone.now())
 
 
 # ------------------------------- Private chat -------------------------------

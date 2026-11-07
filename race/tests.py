@@ -1,3 +1,203 @@
-from django.test import TestCase
+from datetime import timedelta
 
-# Create your tests here.
+from django.contrib.auth.models import User
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
+from django.utils import timezone
+
+from . import services as sv
+from .models import (AccountGroup, AccountIdentity, CircleMember, Participant,
+                     Profile, QualitySession, Race, Report, Review)
+
+
+def make_user(username, role="customer", email="", phone=""):
+    user = User.objects.create_user(username=username, password="Str0ngPass!234")
+    profile = sv.get_profile(user)
+    profile.role = role
+    profile.email = email
+    profile.phone = phone
+    profile.save()
+    return user
+
+
+class HomePageTests(TestCase):
+    def setUp(self):
+        self.customer = make_user("customer1", "customer")
+        self.seller = make_user("seller1", "seller")
+
+    def test_guest_home_renders(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Hall of Fame")
+        self.assertContains(response, "My Circle")
+        self.assertNotContains(response, "My Posts")
+
+    def test_customer_home_renders(self):
+        self.client.force_login(self.customer)
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Start a Race")
+        self.assertNotContains(response, "Recent activities")
+
+    def test_seller_home_shows_profile_then_posts(self):
+        self.client.force_login(self.seller)
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode()
+        self.assertIn("seller1", body)
+        self.assertIn("My Posts", body)
+        self.assertIn("Recent activities", body)
+        self.assertLess(body.index("seller-hero"), body.index(">🛍 My Posts</h2>"))
+        self.assertLess(body.index(">🛍 My Posts</h2>"), body.index(">🕒 Recent activities</h2>"))
+        self.assertLess(body.index(">🕒 Recent activities</h2>"), body.index(">🤝 My Circle</h3>"))
+
+
+class AccountGroupTests(TestCase):
+    def test_same_email_links_two_accounts(self):
+        first = make_user("first", "customer", email="same@example.com")
+        second = make_user("second", "seller", email="same@example.com")
+        sv.link_account(first.profile, email="Same@Example.com")
+        sv.link_account(second.profile, email="same@example.com")
+        first.profile.refresh_from_db()
+        second.profile.refresh_from_db()
+        self.assertIsNotNone(first.profile.account_group_id)
+        self.assertEqual(first.profile.account_group_id, second.profile.account_group_id)
+        self.assertIn(second.profile, first.profile.other_accounts)
+        self.assertEqual(AccountIdentity.objects.get(kind="email", value="same@example.com").group_id,
+                         first.profile.account_group_id)
+
+    def test_same_device_links_two_accounts(self):
+        first = make_user("dev1")
+        second = make_user("dev2")
+        sv.link_account(first.profile, device="device-abc")
+        sv.link_account(second.profile, device="device-abc")
+        first.profile.refresh_from_db()
+        second.profile.refresh_from_db()
+        self.assertEqual(first.profile.account_group_id, second.profile.account_group_id)
+
+    def test_different_people_are_not_grouped(self):
+        first = make_user("solo1", email="one@example.com")
+        second = make_user("solo2", email="two@example.com")
+        sv.link_account(first.profile, email="one@example.com", device="device-1")
+        sv.link_account(second.profile, email="two@example.com", device="device-2")
+        first.profile.refresh_from_db()
+        second.profile.refresh_from_db()
+        self.assertNotEqual(first.profile.account_group_id, second.profile.account_group_id)
+
+    def test_signup_with_shared_email_creates_group(self):
+        for username in ("signup1", "signup2"):
+            response = self.client.post("/signup/", {
+                "username": username, "password": "Str0ngPass!234",
+                "email": "family@example.com", "phone": "",
+            })
+            self.assertEqual(response.status_code, 302)
+            self.client.logout()
+        groups = AccountGroup.objects.filter(
+            profiles__email="family@example.com").distinct()
+        self.assertEqual(groups.count(), 1)
+        self.assertEqual(groups.first().profiles.count(), 2)
+
+    def test_common_password_is_rejected(self):
+        response = self.client.post("/signup/", {
+            "username": "weakuser", "password": "password123",
+            "email": "weak@example.com", "phone": "",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "too common")
+        self.assertFalse(User.objects.filter(username="weakuser").exists())
+
+
+class ReviewTests(TestCase):
+    def setUp(self):
+        self.customer = make_user("buyer", "customer")
+        self.winner = make_user("winner", "seller")
+        self.other = make_user("other", "seller")
+        self.race = Race.objects.create(customer=self.customer, product="Phone", budget=100)
+        self.win_p = Participant.objects.create(
+            race=self.race, seller=self.winner, slot=1, display_name="Winner",
+            product_name="Phone", price=90, details="", image="products/x.jpg")
+        self.other_p = Participant.objects.create(
+            race=self.race, seller=self.other, slot=2, display_name="Other",
+            product_name="Phone", price=95, details="", image="products/y.jpg")
+
+    def test_only_winner_can_be_reviewed(self):
+        self.client.force_login(self.customer)
+        response = self.client.get(f"/race/{self.race.id}/review/{self.other.id}/")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Review.objects.count(), 0)
+
+    def test_review_after_winning(self):
+        self.race.status = "won"
+        self.race.winner = self.win_p
+        self.race.save()
+        self.client.force_login(self.customer)
+        response = self.client.get(f"/race/{self.race.id}/review/{self.winner.id}/")
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post(f"/race/{self.race.id}/review/{self.winner.id}/", {
+            "good_quality": "on", "comfortable": "on",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Review.objects.filter(race=self.race, seller=self.winner).count(), 1)
+
+
+class PrivacyTests(TestCase):
+    def setUp(self):
+        self.customer = make_user("locbuyer", "customer")
+        self.seller = make_user("locseller", "seller")
+        self.race = Race.objects.create(customer=self.customer, product="Bag", budget=50,
+                                        location="12 Private Street")
+
+    def test_lobby_hides_location(self):
+        payload = sv.lobby_race(self.race)
+        self.assertNotIn("location", payload)
+
+    def test_race_access(self):
+        self.assertFalse(sv.race_access(self.seller, self.race.id))
+        Participant.objects.create(race=self.race, seller=self.seller, slot=1,
+                                   display_name="S", product_name="Bag", price=40,
+                                   details="", image="products/z.jpg")
+        self.assertTrue(sv.race_access(self.seller, self.race.id))
+        self.assertTrue(sv.race_access(self.customer, self.race.id))
+        stranger = make_user("stranger")
+        self.assertFalse(sv.race_access(stranger, self.race.id))
+
+    def test_report_screenshot_staff_only(self):
+        staff = User.objects.create_user("staff", password="Str0ngPass!234", is_staff=True)
+        report = Report.objects.create(seller=self.seller, reporter=self.customer, problem="bad")
+        report.screenshot.save("proof.jpg", SimpleUploadedFile("proof.jpg", b"fake", content_type="image/jpeg"))
+        self.client.force_login(self.customer)
+        self.assertEqual(self.client.get(f"/reports/{report.id}/screenshot/").status_code, 403)
+        self.client.force_login(staff)
+        with override_settings(MEDIA_ROOT=report.screenshot.storage.location):
+            response = self.client.get(f"/reports/{report.id}/screenshot/")
+        self.assertEqual(response.status_code, 200)
+
+
+class QualitySessionTests(TestCase):
+    def setUp(self):
+        self.customer = make_user("qbuyer", "customer")
+        self.seller = make_user("qseller", "seller")
+        self.race = Race.objects.create(customer=self.customer, product="Shoes", budget=80)
+        Participant.objects.create(race=self.race, seller=self.seller, slot=1,
+                                   display_name="S", product_name="Shoes", price=70,
+                                   details="", image="products/q.jpg")
+
+    def test_one_window_per_seller_per_race(self):
+        session = sv.start_quality_session(self.seller, self.race.id)
+        self.assertIsNotNone(session)
+        self.assertIsNotNone(sv.start_quality_session(self.seller, self.race.id))
+        sv.end_quality_session(session.id)
+        self.assertIsNone(sv.start_quality_session(self.seller, self.race.id))
+
+    def test_window_expires_on_server_clock(self):
+        session = sv.start_quality_session(self.seller, self.race.id)
+        QualitySession.objects.filter(pk=session.id).update(
+            started_at=timezone.now() - timedelta(seconds=31))
+        self.assertIsNone(sv.start_quality_session(self.seller, self.race.id))
+        self.assertIsNone(sv.quality_for_race(self.race.id))
+
+    def test_only_participant_seller_can_stream(self):
+        self.assertTrue(sv.can_stream_quality(self.seller, self.race.id))
+        self.assertTrue(sv.can_stream_quality(self.customer, self.race.id))
+        stranger = make_user("qstranger")
+        self.assertFalse(sv.can_stream_quality(stranger, self.race.id))

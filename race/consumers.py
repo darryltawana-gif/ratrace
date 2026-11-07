@@ -28,6 +28,11 @@ class LobbyConsumer(Base):
 class RaceConsumer(Base):
     async def connect(self):
         self.race_id = self.scope["url_route"]["kwargs"]["race_id"]
+        user = self.scope["user"]
+        allowed = await database_sync_to_async(services.race_access)(user, self.race_id)
+        if not allowed:
+            await self.close()
+            return
         self.group = f"race_{self.race_id}"
         await self.channel_layer.group_add(self.group, self.channel_name)
         await self.accept()
@@ -63,12 +68,18 @@ class RaceConsumer(Base):
                 user, self.race_id, str(content.get("text", "")))
         elif action == "quality_request":
             # Seller asks the customer to watch a live Quality Proof video.
-            allowed = await database_sync_to_async(services.can_stream_quality)(user, self.race_id)
-            if allowed:
+            # The server owns the clock and allows one 30-second window per race.
+            session = await database_sync_to_async(services.start_quality_session)(user, self.race_id)
+            if session:
                 await self.channel_layer.group_send(self.group, {
                     "type": "relay",
                     "payload": {"type": "quality_request",
-                                "seller_id": user.id, "seller": user.username}})
+                                "seller_id": user.id, "seller": user.username,
+                                "seconds": services.quality_seconds_left(session)}})
+            else:
+                await self.send_json({
+                    "type": "quality_denied",
+                    "message": "Your 30-second Quality Proof for this race has already been used."})
         if ok:
             state = await database_sync_to_async(services.race_state)(self.race_id)
             await self.channel_layer.group_send(
@@ -76,7 +87,11 @@ class RaceConsumer(Base):
 
 
 class QualityConsumer(Base):
-    """WebRTC signalling for the 30-second Quality Proof video."""
+    """WebRTC signalling for the 30-second Quality Proof video.
+
+    The timer is based on the server-side QualitySession started by the
+    seller. Reconnecting never gives a fresh 30 seconds.
+    """
     async def connect(self):
         self.race_id = self.scope["url_route"]["kwargs"]["race_id"]
         user = self.scope["user"]
@@ -87,20 +102,35 @@ class QualityConsumer(Base):
         if not allowed:
             await self.close()
             return
-        self.group = f"qp_{self.race_id}"
         self.role = await database_sync_to_async(services.race_role)(user, self.race_id)
+        if self.role == "seller":
+            session = await database_sync_to_async(services.start_quality_session)(user, self.race_id)
+        else:
+            session = await database_sync_to_async(services.quality_for_race)(self.race_id)
+        if not session:
+            await self.accept()
+            await self.send_json({
+                "type": "denied",
+                "message": "There is no active Quality Proof right now. A seller must start one first."})
+            await self.close()
+            return
+        self.session_id = session.id
+        self.seconds_left = services.quality_seconds_left(session)
+        self.group = f"qp_{self.race_id}"
         await self.channel_layer.group_add(self.group, self.channel_name)
         await self.accept()
-        await self.send_json({"type": "ready", "role": self.role, "seconds": services.QUALITY_SECONDS})
+        await self.send_json({"type": "ready", "role": self.role,
+                              "seconds": self.seconds_left})
         await self.channel_layer.group_send(
             self.group, {"type": "relay", "payload": {"type": "peer_join", "role": self.role}})
-        # The 30-second clock starts when the customer joins to watch.
-        if self.role == "customer":
-            await self.start_timer()
+        # Both sides get the same countdown, measured from the seller's start.
+        if self.seconds_left > 0:
+            await self.start_timer(self.seconds_left)
 
-    async def start_timer(self):
+    async def start_timer(self, seconds):
         async def countdown():
-            await asyncio.sleep(services.QUALITY_SECONDS)
+            await asyncio.sleep(seconds)
+            await database_sync_to_async(services.end_quality_session)(self.session_id)
             await self.channel_layer.group_send(
                 self.group, {"type": "relay", "payload": {"type": "time_up"}})
             await self.channel_layer.group_send(
@@ -123,8 +153,12 @@ class QualityConsumer(Base):
         if kind not in ("hello", "offer", "answer", "ice", "hangup"):
             return
         if kind == "hangup":
+            if getattr(self, "session_id", None):
+                await database_sync_to_async(services.end_quality_session)(self.session_id)
             await self.channel_layer.group_send(
                 self.group, {"type": "relay", "payload": {"type": "peer_left", "role": self.role}})
+            await self.channel_layer.group_send(
+                f"race_{self.race_id}", {"type": "relay", "payload": {"type": "quality_over"}})
             return
         await self.channel_layer.group_send(self.group, {
             "type": "relay",

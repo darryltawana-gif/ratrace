@@ -4,11 +4,6 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
-# Kept only for internal slot ordering (1 = first to join).
-# The animal names are no longer shown anywhere in the interface.
-ANIMALS = [("Cheetah", "🐆"), ("Lion", "🦁"), ("Ostrich", "🦤"), ("Greyhound", "🐕"),
-           ("Buffalo", "🐃"), ("Kudu", "🦌"), ("Rhino", "🦏"), ("Hare", "🐇"),
-           ("Stray Dog", "🐕‍🦺"), ("Tortoise", "🐢")]
 MAX_SELLERS = 10
 RACE_MINUTES = 20
 
@@ -51,6 +46,44 @@ CIRCLE_TOPICS = [
     ("products", "Tell me about your products"),
     ("other", "Any other talks"),
 ]
+CIRCLE_TOPIC_KEYS = {key for key, _label in CIRCLE_TOPICS}
+
+
+class AccountGroup(models.Model):
+    """Several accounts that belong to the same person.
+
+    Two accounts are grouped when they share an email, a phone number or the
+    same browser (the device cookie set at sign-up). This is for our records
+    only; nothing about the link is shown to other customers or sellers.
+    """
+    label = models.CharField(max_length=120, blank=True, default="")
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created"]
+
+    def __str__(self):
+        names = ", ".join(p.user.username for p in self.profiles.select_related("user")[:5])
+        return self.label or names or f"Account group #{self.pk}"
+
+    @property
+    def accounts(self):
+        return [p.user for p in self.profiles.select_related("user").order_by("user__date_joined")]
+
+
+class AccountIdentity(models.Model):
+    """A unique clue (email, phone or device) that links accounts together."""
+    KIND = [("email", "Email"), ("phone", "Phone"), ("device", "Device")]
+    group = models.ForeignKey(AccountGroup, on_delete=models.CASCADE, related_name="identities")
+    kind = models.CharField(max_length=10, choices=KIND)
+    value = models.CharField(max_length=255)
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("kind", "value")]
+
+    def __str__(self):
+        return f"{self.get_kind_display()}: {self.value}"
 
 
 class Profile(models.Model):
@@ -63,6 +96,14 @@ class Profile(models.Model):
     email = models.EmailField(blank=True, default="", db_index=True)
     phone = models.CharField(max_length=32, blank=True, default="", db_index=True)
     category = models.CharField(max_length=20, choices=CATEGORIES, blank=True, default="")
+    account_group = models.ForeignKey(AccountGroup, null=True, blank=True,
+                                      on_delete=models.SET_NULL, related_name="profiles")
+
+    @property
+    def other_accounts(self):
+        if not self.account_group_id:
+            return Profile.objects.none()
+        return self.account_group.profiles.exclude(pk=self.pk).select_related("user")
 
     def __str__(self):
         return f"{self.user.username} ({self.role})"
@@ -103,8 +144,9 @@ class Profile(models.Model):
 
     @property
     def hall_of_fame(self):
+        """Hall of Fame entry: 5+ combined Good Quality + Comfortable ticks."""
         c = self._counts()
-        return c["good"] >= HALL_OF_FAME_MIN or c["comfortable"] >= HALL_OF_FAME_MIN
+        return (c["good"] + c["comfortable"]) >= HALL_OF_FAME_MIN
 
     @property
     def category_label(self):
@@ -170,10 +212,6 @@ class Participant(models.Model):
     joined_at = models.DateTimeField(auto_now_add=True)
 
     @property
-    def animal(self):
-        return ANIMALS[self.slot - 1]
-
-    @property
     def final_price(self):
         return (self.price * (100 - self.discount) / Decimal(100)).quantize(Decimal("0.01"))
 
@@ -181,6 +219,35 @@ class Participant(models.Model):
     def progress(self):
         # discount: 1 point per %, delivery: 20 points, promo: 10 points per free item. Max 100.
         return min(100, min(self.discount, 50) + (20 if self.delivery else 0) + 10 * self.promo)
+
+
+class QualitySession(models.Model):
+    """One 30-second Quality Proof window per seller in a race.
+
+    The clock starts on the server when the seller starts the proof, so
+    reconnecting the camera or refreshing the page cannot reset it.
+    """
+    race = models.ForeignKey(Race, on_delete=models.CASCADE, related_name="quality_sessions")
+    seller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="quality_sessions")
+    started_at = models.DateTimeField(default=timezone.now)
+    ended_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        unique_together = [("race", "seller")]
+        ordering = ["-started_at"]
+
+    def __str__(self):
+        return f"Quality proof: {self.seller.username} on race {self.race_id}"
+
+    @property
+    def ends_at(self):
+        return self.started_at + timedelta(seconds=30)
+
+    def seconds_left(self):
+        if self.ended_at:
+            return 0
+        return max(0, int((self.ends_at - timezone.now()).total_seconds()))
 
 
 class Post(models.Model):
@@ -316,7 +383,7 @@ class Report(models.Model):
     reporter = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
                                  on_delete=models.SET_NULL, related_name="reports_made")
     problem = models.TextField()
-    screenshot = models.ImageField(upload_to="reports/", blank=True, null=True)
+    screenshot = models.ImageField(upload_to="private/reports/%Y/%m/", blank=True, null=True)
     created = models.DateTimeField(auto_now_add=True)
     resolved = models.BooleanField(default=False)
 

@@ -4,5 +4,6 @@
   <h2>Login</h2>
   <form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn" style="width:100%;margin-top:8px">Login</button></form>
   <p class="muted" style="margin-top:14px">No account? <a href="{% url 'signup' %}">Sign up</a></p>
+  <p class="muted"><a href="{% url 'password_reset' %}">Forgot your password?</a></p>
 </div>
 {% endblock %}

@@ -22,13 +22,13 @@
 
 <div id="cfg" hidden data-race="{{ race.id }}" data-owner="{% if is_owner %}1{% else %}0{% endif %}"
      data-csrf="{{ csrf_token }}" data-me="{{ request.user.id }}" data-live="{% if race.is_live %}1{% else %}0{% endif %}"
-     data-qsec="{{ quality_seconds }}"></div>
+     data-member="{% if is_owner or mine %}1{% else %}0{% endif %}" data-qsec="{{ quality_seconds }}"></div>
 
 <div class="card">
   <div class="row"><h2 style="margin:0">{{ race.product }}</h2><span class="chip">Budget {{ race.budget }}</span></div>
   <p class="muted" style="margin:.5em 0">
     Started at <b id="start"></b> · <span id="cd"></span> · Spots left <b id="slots"></b>/10
-    {% if race.location %}<br>📍 Customer location: <b>{{ race.location }}</b>{% endif %}
+    {% if race.location and is_owner or race.location and mine %}<br>📍 Customer location: <b>{{ race.location }}</b>{% endif %}
   </p>
   {% if is_owner and race.is_live %}
   <div class="row">
@@ -89,7 +89,7 @@
           <label class="review-opt"><input type="checkbox" name="comfortable">{% include "includes/review_icon.html" with icon="comfortable" %}<span class="lbl">Comfortable to talk to</span></label>
           <label class="review-opt"><input type="checkbox" name="reliable">{% include "includes/review_icon.html" with icon="reliable" %}<span class="lbl">Very reliable</span></label>
           <label class="review-opt"><input type="checkbox" name="fair_price">{% include "includes/review_icon.html" with icon="fair" %}<span class="lbl">Fair Price</span></label>
-          <label class="review-opt"><input type="checkbox" name="unfriendly">{% include "includes/review_icon.html" with icon="angry" %}<span class="lbl">Ufriendly</span></label>
+          <label class="review-opt"><input type="checkbox" name="unfriendly">{% include "includes/review_icon.html" with icon="angry" %}<span class="lbl">Unfriendly</span></label>
         </div>
       </div>
       <div class="modal-foot">
@@ -125,6 +125,7 @@
 <script>
 const cfg = document.getElementById('cfg').dataset;
 const RACE_ID = Number(cfg.race), IS_OWNER = cfg.owner === '1', CSRF = cfg.csrf, ME = Number(cfg.me);
+const IS_MEMBER = cfg.member === '1';
 const QSEC = Number(cfg.qsec || 30);
 let live = cfg.live === '1', expires = null, winnerId = null, lastState = null, ws = null;
 let promoDraft = null, promoFocus = false;
@@ -210,7 +211,7 @@ function render(s){
   }
 }
 
-(function connect(){
+function connect(){
   ws = new WebSocket(`${wsScheme}://${location.host}/ws/race/${RACE_ID}/`);
   ws.onmessage = e => {
     const d = JSON.parse(e.data);
@@ -225,6 +226,10 @@ function render(s){
       if (navigator.vibrate) navigator.vibrate([180, 90, 180]);
       toast('🎥 ' + d.seller + ' sent a live Quality Proof');
     }
+    else if (d.type === 'quality_denied') {
+      toast(d.message);
+      setQStatus(d.message);
+    }
     else if (d.type === 'quality_over') {
       const b = document.getElementById('qpCustomer');
       if (b){ b.classList.remove('qp-glow'); b.textContent = '👁 View Quality'; }
@@ -237,8 +242,9 @@ function render(s){
       if (lastState) render(lastState);
     }
   };
-  ws.onclose = () => { if (live) setTimeout(connect, 2000); };
-})();
+  ws.onclose = () => { if (live && IS_MEMBER) setTimeout(connect, 2000); };
+}
+if (IS_MEMBER) connect();
 
 if (over.dataset.initial) showOver(over.dataset.initial);
 
@@ -283,12 +289,13 @@ async function openQuality(){
     }
   }
   connectQuality();
-  startLocalCountdown();
+  setQStatus('Checking the Quality Proof timer…');
 }
 
-function startLocalCountdown(){
-  clearInterval(qTimer); qLeft = QSEC;
+function startLocalCountdown(seconds){
+  clearInterval(qTimer); qLeft = Math.max(0, Number(seconds) || 0);
   const el = document.getElementById('qcount'); if (el) el.textContent = qLeft + 's';
+  if (qLeft <= 0){ endStream(); setQStatus('Time is up — the 30-second video has ended.'); return; }
   qTimer = setInterval(() => {
     qLeft -= 1;
     const e = document.getElementById('qcount'); if (e) e.textContent = Math.max(qLeft, 0) + 's';
@@ -302,8 +309,14 @@ function connectQuality(){
   qws.onmessage = async e => {
     const d = JSON.parse(e.data);
     if (d.type === 'ready') {
+      startLocalCountdown(d.seconds);
       setQStatus(d.role === 'seller' ? 'Waiting for the customer to open the video…' : 'Connecting to the seller…');
       if (d.role === 'customer') qsend({ kind: 'hello' });
+    } else if (d.type === 'denied') {
+      setQStatus(d.message);
+      toast(d.message);
+      clearInterval(qTimer); endStream();
+      setTimeout(closeQuality, 1800);
     } else if (d.type === 'peer_join') {
       setQStatus('The other person joined. Connecting video…');
       // The customer greets again so a seller who joined late can start the stream.

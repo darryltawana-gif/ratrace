@@ -8,7 +8,13 @@ from race.forms import LoginForm
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("login/", auth_views.LoginView.as_view(authentication_form=LoginForm), name="login"),
-    path("", include("django.contrib.auth.urls")),   # logout etc.
+    path("", include("django.contrib.auth.urls")),   # logout, password reset, etc.
     path("", include("race.urls")),
-    re_path(r"^media/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
 ]
+
+if settings.DEBUG:
+    # Local development only. Product photos are public, but report evidence
+    # under media/private/ must stay behind the staff-only view.
+    urlpatterns += [
+        re_path(r"^media/(?!private/)(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
+    ]

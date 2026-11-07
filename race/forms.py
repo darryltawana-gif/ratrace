@@ -1,6 +1,7 @@
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 
 from .models import (Race, Participant, Profile, Post, Comment, CircleMessage,
@@ -25,8 +26,8 @@ class SignupForm(forms.Form):
         required=False, max_length=32, label="Phone number",
         widget=forms.TextInput(attrs={"placeholder": "+263 77 000 0000", "autocomplete": "tel"}))
     password = forms.CharField(
-        min_length=6, label="Password",
-        widget=forms.PasswordInput(attrs={"placeholder": "At least 6 characters", "autocomplete": "new-password"}))
+        min_length=8, label="Password",
+        widget=forms.PasswordInput(attrs={"placeholder": "At least 8 characters", "autocomplete": "new-password"}))
 
     def clean_username(self):
         name = normalize_username(self.cleaned_data["username"])
@@ -34,16 +35,23 @@ class SignupForm(forms.Form):
             raise forms.ValidationError("That username is already taken. Please try another one.")
         return name
 
+    def clean_password(self):
+        password = self.cleaned_data["password"]
+        candidate = User(username=self.cleaned_data.get("username", ""))
+        try:
+            validate_password(password, candidate)
+        except ValidationError as exc:
+            raise forms.ValidationError(exc.messages)
+        return password
+
     def clean(self):
         cd = super().clean()
         email = (cd.get("email") or "").strip()
         phone = (cd.get("phone") or "").strip()
         if not email and not phone:
             raise forms.ValidationError("Please give us an email address or a phone number so we can reach you.")
-        if email and Profile.objects.filter(email__iexact=email).exists():
-            self.add_error("email", "That email is already registered to another account.")
-        if phone and Profile.objects.filter(phone=phone).exists():
-            self.add_error("phone", "That phone number is already registered to another account.")
+        # We deliberately allow the same email/phone on a second account.
+        # The accounts are linked in the database so we can see it is one person.
         return cd
 
 
@@ -72,11 +80,21 @@ class RaceForm(forms.ModelForm):
             "location": forms.TextInput(attrs={"placeholder": "e.g. Avondale, Harare"}),
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["location"].required = True
+
     def clean_budget(self):
         b = self.cleaned_data["budget"]
         if b <= 0:
             raise forms.ValidationError("Budget must be more than 0.")
         return b
+
+    def clean_location(self):
+        location = (self.cleaned_data.get("location") or "").strip()
+        if not location:
+            raise forms.ValidationError("Tell sellers where you are so they know where to deliver.")
+        return location
 
 
 class JoinForm(forms.ModelForm):
@@ -157,6 +175,14 @@ class ProfileForm(forms.ModelForm):
             inspect_image(f)
         return f
 
+    def clean(self):
+        cd = super().clean()
+        if not (cd.get("email") or "").strip() and not (cd.get("phone") or "").strip():
+            raise forms.ValidationError("Keep at least an email address or a phone number on your account.")
+        if cd.get("email"):
+            cd["email"] = cd["email"].strip().lower()
+        return cd
+
     def save(self, commit=True):
         profile = super().save(commit=commit)
         name = self.cleaned_data.get("username")
@@ -231,7 +257,7 @@ class ReviewForm(forms.Form):
         ("comfortable", "Comfortable to talk to"),
         ("reliable", "Very reliable"),
         ("fair_price", "Fair Price"),
-        ("unfriendly", "Ufriendly"),
+        ("unfriendly", "Unfriendly"),
     ]
     good_quality = forms.BooleanField(required=False)
     poor_quality = forms.BooleanField(required=False)

@@ -106,7 +106,13 @@ DATABASES = {
 # Password validation
 # https://docs.djangoproject.com/en/6.1/ref/settings/#auth-password-validators
 
-AUTH_PASSWORD_VALIDATORS = []
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+     "OPTIONS": {"min_length": 8}},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
 
 
 
@@ -125,29 +131,39 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 
-# Email
-# https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
-
-MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
-    },
-}
+# Email (used by password reset). In production set EMAIL_HOST, EMAIL_PORT,
+# EMAIL_HOST_USER, EMAIL_HOST_PASSWORD and DEFAULT_FROM_EMAIL.
+EMAIL_BACKEND = os.environ.get(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend" if DEBUG
+    else "django.core.mail.backends.smtp.EmailBackend",
+)
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "1") == "1"
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "The Rat Race <no-reply@ratrace.local>")
+SERVER_EMAIL = DEFAULT_FROM_EMAIL
+PASSWORD_RESET_TIMEOUT = 60 * 60 * 24
 
 # ---------- Production settings (only active on Render) ----------
 import dj_database_url
-
-STATIC_ROOT = BASE_DIR / "staticfiles"
 
 if "RENDER" in os.environ:
     DEBUG = False
     SECRET_KEY = os.environ["SECRET_KEY"]
     HOST = os.environ["RENDER_EXTERNAL_HOSTNAME"]
-    ALLOWED_HOSTS = [HOST]
-    CSRF_TRUSTED_ORIGINS = ["https://" + HOST]
+    ALLOWED_HOSTS = [h.strip() for h in
+                     os.environ.get("ALLOWED_HOSTS", HOST).split(",") if h.strip()]
+    CSRF_TRUSTED_ORIGINS = [
+        o.strip() for o in
+        os.environ.get("CSRF_TRUSTED_ORIGINS", "https://" + HOST).split(",") if o.strip()
+    ]
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
     DATABASES["default"] = dj_database_url.config(conn_max_age=600)     
@@ -191,6 +207,20 @@ VAPID_ADMIN_EMAIL = os.environ.get("VAPID_ADMIN_EMAIL", "admin@example.com")
 DATA_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 
+# ------------------------------ Security defaults ------------------------------
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+X_FRAME_OPTIONS = "DENY"
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "same-origin"
+SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 2000
+
 if not DEBUG:
-    SECURE_CONTENT_TYPE_NOSNIFF = True
-    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = os.environ.get("SECURE_SSL_REDIRECT", "1") == "1"
+    SECURE_HSTS_SECONDS = int(os.environ.get("SECURE_HSTS_SECONDS", "31536000"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True

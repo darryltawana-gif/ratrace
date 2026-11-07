@@ -1,16 +1,20 @@
 import io
 import json
+import uuid
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import F, Q, Max
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse, HttpResponse, FileResponse, Http404
 from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.cache import cache_control
 from django.views.decorators.http import require_POST
 
@@ -38,10 +42,12 @@ def home(request):
     sv.expire_races()
     sellers = sv.annotated_sellers()
 
+    profile = None
     circle = None
     circle_members = []
-    circle_pending = []
+    circle_pending = 0
     seller_circles = []
+    seller_posts = []
     deals = []
     if request.user.is_authenticated:
         profile = sv.get_profile(request.user)
@@ -52,6 +58,7 @@ def home(request):
         elif profile.role == "seller":
             seller_circles = sv.circle_for_seller(request.user)
             circle_pending = sv.pending_requests(request.user).count()
+            seller_posts = sv.seller_posts(request.user)[:8]
             deals = sv.recent_deals(request.user)
 
     hall = [p for p in sellers if p.hall_of_fame]
@@ -59,7 +66,8 @@ def home(request):
         "sellers": sellers, "hall": hall, "categories": CATEGORY_LABELS,
         "circle": circle, "circle_members": circle_members,
         "circle_pending": circle_pending, "seller_circles": seller_circles,
-        "deals": deals,
+        "seller_posts": seller_posts, "deals": deals, "my_profile": profile,
+        "live_count": sv.live_races().count(),
     })
 
 
@@ -69,13 +77,42 @@ def signup(request):
         cd = form.cleaned_data
         user = User.objects.create_user(username=cd["username"], password=cd["password"])
         profile = sv.get_profile(user)
-        profile.email = (cd.get("email") or "").strip()
-        profile.phone = (cd.get("phone") or "").strip()
+        email = sv.normalize_email(cd.get("email"))
+        phone = (cd.get("phone") or "").strip()
+        profile.email = email
+        profile.phone = phone
         profile.save(update_fields=["email", "phone"])
+        # Group this account with any other account that used the same email,
+        # phone number or browser. It stays private in the database/admin.
+        device = request.COOKIES.get("rr_device") or uuid.uuid4().hex
+        sv.link_account(profile, email=email, phone=phone, device=device)
         login(request, user)
         messages.success(request, f"Welcome, {user.username}! Choose below how you want to use The Rat Race.")
-        return redirect("home")
-    return render(request, "registration/signup.html", {"form": form})
+        response = redirect("home")
+        response.set_cookie("rr_device", device, max_age=2 * 365 * 24 * 60 * 60,
+                            httponly=True, samesite="Lax", secure=not settings.DEBUG)
+        return response
+    device = request.COOKIES.get("rr_device") or uuid.uuid4().hex
+    response = render(request, "registration/signup.html", {"form": form})
+    if not request.COOKIES.get("rr_device"):
+        response.set_cookie("rr_device", device, max_age=2 * 365 * 24 * 60 * 60,
+                            httponly=True, samesite="Lax", secure=not settings.DEBUG)
+    return response
+
+
+def _role_busy(user):
+    """True while the user is in a live race on either side."""
+    return (Race.objects.filter(customer=user, status="open", expires_at__gt=timezone.now()).exists()
+            or Participant.objects.filter(seller=user, active=True, race__status="open",
+                                          race__expires_at__gt=timezone.now()).exists())
+
+
+def _safe_next(request, fallback="home"):
+    target = request.META.get("HTTP_REFERER", "")
+    if target and url_has_allowed_host_and_scheme(
+            target, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+        return target
+    return fallback
 
 
 @require_POST
@@ -84,32 +121,34 @@ def set_role(request, role):
     if role not in ("customer", "seller", "none"):
         return redirect("home")
     p = sv.get_profile(request.user)
+    old = p.role
 
     if role == "none":
-        busy = (Race.objects.filter(customer=request.user, status="open", expires_at__gt=timezone.now()).exists()
-                or Participant.objects.filter(seller=request.user, active=True, race__status="open",
-                                              race__expires_at__gt=timezone.now()).exists())
-        if busy:
+        if _role_busy(request.user):
             messages.error(request, "Exit your current race first, then cancel your mode.")
         else:
-            old = p.role
             p.role = "none"
             p.save()
             if old != "none":
                 messages.info(request, f"You left {old} mode. Choose how you want to continue.")
         return redirect("home")
 
-    if p.role in ("none", role):
-        p.role = role
-        p.save()
-        if role == "customer":
-            sv.ensure_circle(request.user)
-        if role == "seller" and (not p.photo or not p.category):
-            messages.info(request, "Add your profile photo and choose the category you sell in.")
-            return redirect("profile")
-    else:
-        messages.error(request, f"Cancel {p.role} mode first.")
-    return redirect(request.META.get("HTTP_REFERER", "home"))
+    # You can switch straight from customer to seller (or back), but only when
+    # you are not in the middle of a race.
+    if old != "none" and old != role and _role_busy(request.user):
+        messages.error(request, "Finish or exit your current race before switching modes.")
+        return redirect("home")
+
+    p.role = role
+    p.save()
+    if role == "customer":
+        sv.ensure_circle(request.user)
+    if role == "seller" and (not p.photo or not p.category):
+        messages.info(request, "Add your profile photo and choose the category you sell in.")
+        return redirect("profile")
+    if old not in ("none", role):
+        messages.success(request, f"You switched from {old} mode to {role} mode.")
+    return redirect(_safe_next(request))
 
 
 @login_required
@@ -284,6 +323,11 @@ def review_seller(request, race_id, seller_id):
     if not race.participants.filter(seller=seller).exists():
         messages.error(request, "That seller was not in this race.")
         return redirect("home")
+    # Reviews are earned: only the winning seller can be reviewed, and only
+    # after the customer has actually chosen them.
+    if race.status != "won" or not race.winner or race.winner.seller_id != seller.id:
+        messages.error(request, "You can review a seller only after choosing them as the winner.")
+        return redirect("race_room", race.id)
     existing = Review.objects.filter(race=race, seller=seller).first()
     initial = None
     if existing:
@@ -410,7 +454,9 @@ def profile(request):
         if profile.role == "seller" and not form.cleaned_data.get("category"):
             form.add_error("category", "Please choose the category you sell in.")
         else:
-            form.save()
+            profile = form.save()
+            device = request.COOKIES.get("rr_device", "")
+            sv.link_account(profile, email=profile.email, phone=profile.phone, device=device)
             messages.success(request, "Profile saved.")
             return redirect("home")
     return render(request, "profile.html", {"form": form, "profile": profile})
@@ -583,6 +629,20 @@ def report_seller(request, seller_id):
         messages.success(request, "Your report has been sent to the Rat Race team. Thank you.")
         return redirect("seller_public", seller.id)
     return render(request, "report.html", {"form": form, "seller": seller})
+
+
+@login_required
+def report_screenshot(request, report_id):
+    """Report screenshots are private evidence for staff only."""
+    if not request.user.is_staff:
+        raise PermissionDenied
+    report = get_object_or_404(Report, pk=report_id)
+    if not report.screenshot:
+        raise Http404("No screenshot attached.")
+    try:
+        return FileResponse(report.screenshot.open("rb"))
+    except FileNotFoundError:
+        raise Http404("Screenshot file is missing.")
 
 
 # ------------------------------- Other pages -------------------------------
