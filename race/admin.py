@@ -3,8 +3,8 @@ from django.urls import reverse
 from django.utils.html import format_html
 
 from .models import (Profile, Race, Participant, Post, Circle, CircleMember,
-                     CircleMessage, ChatRoom, ChatMessage, Review, Report,
-                     Comment, PushSubscription, AccountGroup, AccountIdentity,
+                     CircleMessage, CircleReaction, ChatRoom, ChatMessage, Review,
+                     Report, Comment, PushSubscription, AccountGroup, AccountIdentity,
                      QualitySession)
 
 
@@ -87,6 +87,13 @@ class ReportAdmin(admin.ModelAdmin):
 class CircleMemberAdmin(admin.ModelAdmin):
     list_display = ("seller", "circle", "status", "created", "responded")
     list_filter = ("status",)
+
+
+@admin.register(CircleReaction)
+class CircleReactionAdmin(admin.ModelAdmin):
+    list_display = ("message", "user", "emoji", "created")
+    list_filter = ("emoji",)
+    search_fields = ("user__username", "message__text")
 
 
 @admin.register(QualitySession)

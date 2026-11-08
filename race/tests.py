@@ -7,8 +7,8 @@ from django.utils import timezone
 
 from . import services as sv
 from .models import (AccountGroup, AccountIdentity, Circle, CircleMember,
-                     Participant, Post, Profile, QualitySession, Race, Report,
-                     Review)
+                     CircleMessage, Participant, Post, Profile, QualitySession,
+                     Race, Report, Review)
 
 
 def make_user(username, role="customer", email="", phone=""):
@@ -253,6 +253,49 @@ class CircleTests(TestCase):
 
         later = sv.save_circle_message(self.seller, self.circle.id, "About my products", "")
         self.assertEqual(later["message"]["topic"], "products")
+
+    def test_customer_and_seller_can_react_with_emoji(self):
+        msg = CircleMessage.objects.create(
+            circle=self.circle, sender=self.customer, text="Hello", topic="other")
+        res = sv.react_to_circle_message(self.seller, self.circle.id, msg.id, "👍")
+        self.assertEqual(res["message_id"], msg.id)
+        self.assertEqual(res["reactions"], [
+            {"emoji": "👍", "count": 1, "users": [self.seller.id]}])
+
+        # Tapping the same emoji again removes the reaction.
+        res = sv.react_to_circle_message(self.seller, self.circle.id, msg.id, "👍")
+        self.assertEqual(res["reactions"], [])
+
+        # The customer can react too, and one person may use several emojis.
+        sv.react_to_circle_message(self.customer, self.circle.id, msg.id, "❤️")
+        res = sv.react_to_circle_message(self.customer, self.circle.id, msg.id, "😂")
+        self.assertEqual({r["emoji"] for r in res["reactions"]}, {"❤️", "😂"})
+        self.assertTrue(all(r["count"] == 1 for r in res["reactions"]))
+
+    def test_reactions_require_membership_and_known_emoji(self):
+        msg = CircleMessage.objects.create(
+            circle=self.circle, sender=self.customer, text="Hello", topic="other")
+        outsider = make_user("circlestranger")
+        self.assertIsNone(
+            sv.react_to_circle_message(outsider, self.circle.id, msg.id, "👍"))
+        self.assertIsNone(
+            sv.react_to_circle_message(self.seller, self.circle.id, msg.id, "💩"))
+        self.assertIsNone(
+            sv.react_to_circle_message(self.seller, self.circle.id, 999999, "👍"))
+
+        # A message from another Circle cannot be reached through this one.
+        other_circle = sv.ensure_circle(outsider)
+        other_msg = CircleMessage.objects.create(
+            circle=other_circle, sender=outsider, text="Other", topic="other")
+        self.assertIsNone(
+            sv.react_to_circle_message(self.seller, self.circle.id, other_msg.id, "👍"))
+
+    def test_history_includes_reactions(self):
+        msg = CircleMessage.objects.create(
+            circle=self.circle, sender=self.customer, text="Hello", topic="other")
+        sv.react_to_circle_message(self.seller, self.circle.id, msg.id, "🙏")
+        history = sv.circle_history(self.circle.id)
+        self.assertEqual(history[-1]["reactions"][0]["emoji"], "🙏")
 
 
 class PostTests(TestCase):

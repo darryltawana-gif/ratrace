@@ -12,9 +12,10 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from .models import (Race, Participant, Profile, ChatRoom, ChatMessage,
-                     Post, Circle, CircleMember, CircleMessage, PushSubscription,
-                     AccountGroup, AccountIdentity, QualitySession,
-                     MAX_SELLERS, RACE_MINUTES, CIRCLE_TOPICS, CIRCLE_TOPIC_KEYS)
+                     Post, Circle, CircleMember, CircleMessage, CircleReaction,
+                     PushSubscription, AccountGroup, AccountIdentity, QualitySession,
+                     MAX_SELLERS, RACE_MINUTES, CIRCLE_TOPICS, CIRCLE_TOPIC_KEYS,
+                     CIRCLE_REACTIONS, CIRCLE_REACTION_SET)
 
 log = logging.getLogger(__name__)
 MAX_DISCOUNT = 50
@@ -302,16 +303,69 @@ def pending_requests(user):
             .select_related("circle__customer__profile"))
 
 
-def circle_message_dict(m):
+def _group_reactions(rows):
+    """Group (emoji, user_id) pairs into the shape the chat renders."""
+    order = {emoji: i for i, emoji in enumerate(CIRCLE_REACTIONS)}
+    grouped = {}
+    for emoji, user_id in rows:
+        grouped.setdefault(emoji, []).append(user_id)
+    return [{"emoji": emoji, "count": len(users), "users": users}
+            for emoji, users in sorted(grouped.items(),
+                                       key=lambda item: order.get(item[0], 99))]
+
+
+def reactions_for(message_id):
+    rows = (CircleReaction.objects.filter(message_id=message_id)
+            .order_by("created", "id").values_list("emoji", "user_id"))
+    return _group_reactions(rows)
+
+
+def reaction_map_for(message_ids):
+    """One query for a whole page of messages, so history stays fast."""
+    rows = (CircleReaction.objects.filter(message_id__in=message_ids)
+            .order_by("created", "id")
+            .values_list("message_id", "emoji", "user_id"))
+    grouped = {}
+    for message_id, emoji, user_id in rows:
+        grouped.setdefault(message_id, []).append((emoji, user_id))
+    return {message_id: _group_reactions(pairs)
+            for message_id, pairs in grouped.items()}
+
+
+def circle_message_dict(m, reactions=None):
+    if reactions is None:
+        reactions = reactions_for(m.id)
     return {"id": m.id, "sender_id": m.sender_id,
             "sender": m.sender.username if m.sender else "System",
             "topic": m.topic, "topic_label": dict(CIRCLE_TOPICS).get(m.topic, "Any other talks"),
-            "text": m.text, "created": m.created.isoformat()}
+            "text": m.text, "created": m.created.isoformat(),
+            "reactions": reactions}
 
 
 def circle_history(circle_id, limit=200):
     qs = CircleMessage.objects.filter(circle_id=circle_id).order_by("-created", "-id")[:limit]
-    return [circle_message_dict(m) for m in reversed(list(qs))]
+    messages = list(reversed(list(qs)))
+    reaction_map = reaction_map_for([m.id for m in messages])
+    return [circle_message_dict(m, reaction_map.get(m.id, [])) for m in messages]
+
+
+def react_to_circle_message(user, circle_id, message_id, emoji):
+    """Toggle one emoji from one member on one message."""
+    if emoji not in CIRCLE_REACTION_SET:
+        return None
+    circle = Circle.objects.filter(pk=circle_id).first()
+    if not circle or not is_circle_member(circle, user):
+        return None
+    message = CircleMessage.objects.filter(pk=message_id, circle=circle).first()
+    if not message:
+        return None
+    existing = CircleReaction.objects.filter(
+        message=message, user=user, emoji=emoji).first()
+    if existing:
+        existing.delete()
+    else:
+        CircleReaction.objects.create(message=message, user=user, emoji=emoji)
+    return {"message_id": message.id, "reactions": reactions_for(message.id)}
 
 
 def set_circle_topic(user, circle_id, topic):
@@ -341,7 +395,7 @@ def save_circle_message(user, circle_id, text, topic=""):
             changed = topic
     used_topic = circle.current_topic if circle.current_topic in CIRCLE_TOPIC_KEYS else "other"
     m = CircleMessage.objects.create(circle=circle, sender=user, text=text[:1000], topic=used_topic)
-    return {"message": circle_message_dict(m), "topic_changed": changed}
+    return {"message": circle_message_dict(m, []), "topic_changed": changed}
 
 
 def get_circle(circle_id):

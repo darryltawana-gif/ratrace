@@ -22,7 +22,8 @@ from .forms import (RaceForm, JoinForm, ProfileForm, CommentForm, SignupForm,
                     PostForm, CircleMessageForm, ReviewForm, ReportForm)
 from .models import (Race, Participant, Profile, Post, Circle, CircleMember,
                      CircleMessage, Review, Report, Comment, ChatRoom,
-                     PushSubscription, CIRCLE_TOPICS, CATEGORY_LABELS, RACE_MINUTES)
+                     PushSubscription, CIRCLE_TOPICS, CIRCLE_REACTIONS,
+                     CATEGORY_LABELS, RACE_MINUTES)
 from . import services as sv
 
 
@@ -615,6 +616,7 @@ def circle_chat(request, circle_id):
         "topics": CIRCLE_TOPICS, "circle_id": circle.id,
         "current_topic": circle.current_topic,
         "current_topic_label": circle.current_topic_label,
+        "reaction_options": CIRCLE_REACTIONS,
     })
 
 

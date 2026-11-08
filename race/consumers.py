@@ -213,6 +213,19 @@ class CircleConsumer(Base):
                 await self.channel_layer.group_send(
                     self.group, {"type": "relay", "payload": {"type": "topic", **res}})
             return
+        if content.get("action") == "react":
+            try:
+                message_id = int(content.get("message_id"))
+            except (TypeError, ValueError):
+                return
+            emoji = str(content.get("emoji", ""))
+            res = await database_sync_to_async(services.react_to_circle_message)(
+                self.user, self.circle_id, message_id, emoji)
+            if res:
+                await self.channel_layer.group_send(
+                    self.group,
+                    {"type": "relay", "payload": {"type": "reaction", **res}})
+            return
         text = str(content.get("text", "")).strip()[:1000]
         topic = str(content.get("topic", ""))
         if not text:

@@ -48,6 +48,11 @@ CIRCLE_TOPICS = [
 ]
 CIRCLE_TOPIC_KEYS = {key for key, _label in CIRCLE_TOPICS}
 
+# The small palette offered on every Circle message. Keeping it fixed makes
+# the reaction chips predictable on phones and stops arbitrary payloads.
+CIRCLE_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
+CIRCLE_REACTION_SET = set(CIRCLE_REACTIONS)
+
 
 class AccountGroup(models.Model):
     """Several accounts that belong to the same person.
@@ -321,6 +326,27 @@ class CircleMessage(models.Model):
 
     def __str__(self):
         return f"{self.topic}: {self.text[:40]}"
+
+
+class CircleReaction(models.Model):
+    """One emoji from one member on one Circle message.
+
+    A member may add several different emojis to the same message, and
+    tapping the same emoji again removes it.
+    """
+    message = models.ForeignKey(CircleMessage, on_delete=models.CASCADE,
+                                related_name="reactions")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="circle_reactions")
+    emoji = models.CharField(max_length=8)
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("message", "user", "emoji")]
+        ordering = ["created", "id"]
+
+    def __str__(self):
+        return f"{self.user.username} reacted {self.emoji}"
 
 
 class ChatRoom(models.Model):

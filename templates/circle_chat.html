@@ -20,6 +20,17 @@
  .bub .nm{font-size:.72rem;font-weight:800;opacity:.8;margin-bottom:2px}
  .bub .tp{font-size:.68rem;opacity:.7;margin-top:4px}
  .bub .time{font-size:.66rem;margin-top:3px;opacity:.7;text-align:right}
+ .bub .reactbar{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:6px;white-space:normal}
+ .chip-r{border:1px solid #d9e1f1;background:#f7f9fe;border-radius:999px;padding:1px 8px;font-size:.82rem;cursor:pointer;color:#0b1f4b;line-height:1.6;display:inline-flex;align-items:center;gap:3px}
+ .chip-r.mine{border-color:#d90429;background:#fff0f2}
+ .bub.me .chip-r{background:#16336f;border-color:#3a5a9e;color:#fff}
+ .bub.me .chip-r.mine{background:#d90429;border-color:#ff6b84;color:#fff}
+ .react-add{border:1px dashed #c5d0ea;background:transparent;border-radius:999px;padding:1px 7px;font-size:.78rem;cursor:pointer;color:#5a6a8c;line-height:1.7}
+ .bub.me .react-add{border-color:#3a5a9e;color:#cdd9f3}
+ .picker{display:none;gap:2px;flex-wrap:wrap;max-width:100%;margin-top:5px;background:#fff;border:1px solid var(--border);border-radius:999px;padding:3px 5px;box-shadow:0 2px 8px rgba(11,31,75,.12)}
+ .picker.show{display:flex}
+ .picker button{border:0;background:transparent;font-size:1.15rem;cursor:pointer;padding:2px 3px;border-radius:50%;line-height:1}
+ .picker button:hover{background:#eef3ff}
  .bub.me{align-self:flex-end;background:#0b1f4b;color:#fff;border-bottom-right-radius:4px}
  .bub.them{align-self:flex-start;background:#fff;color:#0b1f4b;border:1px solid #d9e1f1;border-bottom-left-radius:4px}
  .sys{align-self:center;background:#fff0f2;color:#8a0f2b;border:1px solid #f3b4c0;border-radius:999px;padding:6px 14px;font-size:.85rem}
@@ -32,6 +43,7 @@
 <div id="cfg" hidden data-circle="{{ circle.id }}" data-me="{{ request.user.id }}"
      data-owner="{% if is_owner %}1{% else %}0{% endif %}"
      data-topic="{{ current_topic }}" data-topic-label="{{ current_topic_label }}"></div>
+{{ reaction_options|json_script:"reaction-options" }}
 
 <div class="chatwrap">
   <div class="chathead">
@@ -84,6 +96,7 @@ const sendBtn = document.getElementById('send'), statusEl = document.getElementB
 const topicEl = document.getElementById('topic');
 let ws = null, seen = new Set(), lastDay = '';
 let currentTopic = cfg.topic || 'other';
+const REACTIONS = JSON.parse(document.getElementById('reaction-options').textContent);
 
 function atBottom(){ return list.scrollHeight - list.scrollTop - list.clientHeight < 90; }
 function applyTopic(key, label){
@@ -111,14 +124,65 @@ function addMsg(m, stick){
   }
   const el = document.createElement('div');
   el.className = 'bub ' + (m.sender_id === ME ? 'me' : 'them');
+  el.dataset.mid = m.id;
   if (m.sender_id !== ME){ const n = document.createElement('div'); n.className = 'nm'; n.textContent = m.sender; el.appendChild(n); }
   const t = document.createElement('div'); t.textContent = m.text; el.appendChild(t);
   const tp = document.createElement('div'); tp.className = 'tp'; tp.textContent = '#' + (m.topic_label || 'Any other talks'); el.appendChild(tp);
+  const rb = document.createElement('div'); rb.className = 'reactbar'; el.appendChild(rb);
   const ts = document.createElement('div'); ts.className = 'time';
   ts.textContent = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
   el.appendChild(ts);
+  renderReactions(el, m.reactions || []);
   list.appendChild(el);
   if (stick) list.scrollTop = list.scrollHeight;
+}
+function reactTo(messageId, emoji){
+  if (!ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({action:'react', message_id: Number(messageId), emoji}));
+}
+function togglePicker(bubble){
+  const picker = bubble.querySelector('.picker');
+  if (!picker) return;
+  const open = picker.classList.contains('show');
+  document.querySelectorAll('.picker.show').forEach(p => p.classList.remove('show'));
+  if (!open) picker.classList.add('show');
+}
+function renderReactions(bubble, reactions){
+  const bar = bubble.querySelector('.reactbar');
+  if (!bar) return;
+  bar.innerHTML = '';
+  (reactions || []).forEach(r => {
+    const mine = (r.users || []).includes(ME);
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip-r' + (mine ? ' mine' : '');
+    chip.textContent = r.emoji + ' ' + r.count;
+    chip.title = r.count + (r.count === 1 ? ' reaction' : ' reactions') +
+                 (mine ? ' - tap to remove yours' : ' - tap to react');
+    chip.setAttribute('aria-label', chip.title);
+    chip.onclick = () => reactTo(bubble.dataset.mid, r.emoji);
+    bar.appendChild(chip);
+  });
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'react-add';
+  add.textContent = '+ 😊';
+  add.title = 'React with an emoji';
+  add.setAttribute('aria-label', 'React with an emoji');
+  add.onclick = () => togglePicker(bubble);
+  bar.appendChild(add);
+  const picker = document.createElement('div');
+  picker.className = 'picker';
+  REACTIONS.forEach(emoji => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = emoji;
+    b.title = 'React with ' + emoji;
+    b.setAttribute('aria-label', 'React with ' + emoji);
+    b.onclick = () => { reactTo(bubble.dataset.mid, emoji); picker.classList.remove('show'); };
+    picker.appendChild(b);
+  });
+  bar.appendChild(picker);
 }
 function setStatus(ok){ statusEl.textContent = ok ? '● Online' : 'Reconnecting…'; sendBtn.disabled = !ok; }
 function connect(){
@@ -132,6 +196,10 @@ function connect(){
       applyTopic(d.topic, d.topic_label);
       list.scrollTop = list.scrollHeight;
     } else if (d.type === 'message'){ addMsg(d.message, atBottom() || d.message.sender_id === ME); }
+    else if (d.type === 'reaction'){
+      const bubble = list.querySelector('.bub[data-mid="' + d.message_id + '"]');
+      if (bubble) renderReactions(bubble, d.reactions);
+    }
     else if (d.type === 'topic'){ applyTopic(d.topic, d.label); }
     else if (d.type === 'system'){ addSystem(d.message); }
   };
@@ -154,6 +222,11 @@ document.querySelectorAll('.tbtn').forEach(b => b.onclick = () => {
   ws.send(JSON.stringify({action:'topic', topic:b.dataset.topic}));
   applyTopic(b.dataset.topic, b.dataset.label);
   box.focus();
+});
+document.addEventListener('click', e => {
+  if (!e.target.closest('.reactbar')) {
+    document.querySelectorAll('.picker.show').forEach(p => p.classList.remove('show'));
+  }
 });
 applyTopic(currentTopic, cfg.topicLabel);
 connect();
