@@ -23,6 +23,7 @@
 <div id="cfg" hidden data-race="{{ race.id }}" data-owner="{% if is_owner %}1{% else %}0{% endif %}"
      data-csrf="{{ csrf_token }}" data-me="{{ request.user.id }}" data-live="{% if race.is_live %}1{% else %}0{% endif %}"
      data-member="{% if is_owner or mine %}1{% else %}0{% endif %}" data-qsec="{{ quality_seconds }}"></div>
+{{ ice_servers|json_script:"ice-config" }}
 
 <div class="card">
   <div class="row"><h2 style="margin:0">{{ race.product }}</h2><span class="chip">Budget {{ race.budget }}</span></div>
@@ -35,7 +36,7 @@
     <button id="qpCustomer" class="btn navy" onclick="openQuality()">👁 View Quality</button>
     <form method="post" action="{% url 'customer_exit' race.id %}" onsubmit="return confirm('Exit this race?')">{% csrf_token %}<button class="btn danger">Exit race</button></form>
   </div>
-  <p class="msg-note" id="qpHint">A seller can send you a live 30-second Quality Proof video. This button will light up when one does.</p>
+  <p class="msg-note" id="qpHint">A seller can send you a live Quality Proof video for up to 48 minutes. This button will light up when one does.</p>
   {% endif %}
   {% if mine and race.is_live %}
   <div class="row">
@@ -105,7 +106,7 @@
   <div class="modal-box" style="max-width:640px">
     <div class="modal-head">
       <h2>🎥 Quality Proof</h2>
-      <span id="qcount" class="chip">30s</span>
+      <span id="qcount" class="chip">48:00</span>
       <button class="close-x" type="button" onclick="closeQuality()">×</button>
     </div>
     <div class="modal-body">
@@ -114,9 +115,16 @@
         <div id="qlocalwrap"><video id="qlocal" autoplay playsinline muted></video></div>
         <div id="qstatus" class="video-note">Connecting…</div>
       </div>
-      <p class="msg-note">Live video only — at most 30 seconds, and nothing is recorded.</p>
+      <p class="msg-note">Live video only — up to 48 minutes, and nothing is recorded.</p>
     </div>
-    <div class="modal-foot"><button type="button" class="btn danger" onclick="closeQuality()">End video</button></div>
+    <div class="modal-foot">
+      <button type="button" class="btn ghost" onclick="retryVideo()">Reconnect</button>
+      {% if is_owner %}
+      <button type="button" class="btn navy" onclick="closeQuality()">Close video</button>
+      {% else %}
+      <button type="button" class="btn danger" onclick="stopQuality()">Stop video</button>
+      {% endif %}
+    </div>
   </div>
 </div>
 {% endblock %}
@@ -126,7 +134,7 @@
 const cfg = document.getElementById('cfg').dataset;
 const RACE_ID = Number(cfg.race), IS_OWNER = cfg.owner === '1', CSRF = cfg.csrf, ME = Number(cfg.me);
 const IS_MEMBER = cfg.member === '1';
-const QSEC = Number(cfg.qsec || 30);
+const QSEC = Number(cfg.qsec || 2880);
 let live = cfg.live === '1', expires = null, winnerId = null, lastState = null, ws = null;
 let promoDraft = null, promoFocus = false;
 const lanes = document.getElementById('lanes');
@@ -255,57 +263,87 @@ setInterval(() => {
   document.getElementById('cd').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} left`;
 }, 1000);
 
-/* ---------------- Quality Proof: 30-second live video ---------------- */
-const ICE = { iceServers: [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
-] };
+/* ---------------- Quality Proof: live product video (up to 48 minutes) ---------------- */
+const ICE = { iceServers: JSON.parse(document.getElementById('ice-config').textContent) };
 let qws = null, pc = null, localStream = null, qTimer = null, qLeft = QSEC;
+let pendingIce = [], qClosing = false, qAttempts = 0, qRetryTimer = null;
 
 function setQStatus(t){ const el = document.getElementById('qstatus'); if (el) el.textContent = t; }
 function qsend(o){ if (qws && qws.readyState === 1) qws.send(JSON.stringify(o)); }
+function fmtTime(s){
+  s = Math.max(0, Math.floor(Number(s) || 0));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+function setCountdown(seconds){
+  qLeft = Math.max(0, Math.floor(Number(seconds) || 0));
+  const el = document.getElementById('qcount');
+  if (el) el.textContent = fmtTime(qLeft);
+}
 
 function startQualityProof(){
   send({ action: 'quality_request' });
   openQuality();
 }
 
+async function getCamera(){
+  const attempts = [
+    { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 },
+               height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } }, audio: false },
+    { video: { facingMode: { ideal: 'environment' } }, audio: false },
+    { video: true, audio: false }
+  ];
+  let lastError = null;
+  for (const constraints of attempts){
+    try { return await navigator.mediaDevices.getUserMedia(constraints); }
+    catch (e) {
+      lastError = e;
+      if (e.name === 'NotAllowedError' || e.name === 'SecurityError') break;
+    }
+  }
+  throw lastError || new Error('camera unavailable');
+}
+
+async function startCamera(){
+  if (localStream) localStream.getTracks().forEach(t => t.stop());
+  localStream = await getCamera();
+  const local = document.getElementById('qlocal');
+  if (local) { local.srcObject = localStream; local.play().catch(() => {}); }
+}
+
 async function openQuality(){
   document.getElementById('qmodal').classList.add('show');
-  if (IS_OWNER) {
-    // The customer only watches. The seller is the one who streams.
-    setQStatus('Connecting to the seller…');
-  } else {
+  qClosing = false; qAttempts = 0;
+  setCountdown(QSEC);
+  if (!IS_OWNER) {
     setQStatus('Starting camera…');
-    try {
-      localStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-      document.getElementById('qlocal').srcObject = localStream;
-    } catch (e) {
+    try { await startCamera(); }
+    catch (e) {
       setQStatus('Camera permission is needed to show a live video. Allow camera access and try again.');
       return;
     }
+  } else {
+    setQStatus('Connecting to the seller…');
   }
   connectQuality();
-  setQStatus('Checking the Quality Proof timer…');
 }
 
 function startLocalCountdown(seconds){
-  clearInterval(qTimer); qLeft = Math.max(0, Number(seconds) || 0);
-  const el = document.getElementById('qcount'); if (el) el.textContent = qLeft + 's';
-  if (qLeft <= 0){ endStream(); setQStatus('Time is up — the 30-second video has ended.'); return; }
+  clearInterval(qTimer); setCountdown(seconds);
+  if (qLeft <= 0){ endStream(); setQStatus('Time is up — this Quality Proof has ended.'); return; }
   qTimer = setInterval(() => {
-    qLeft -= 1;
-    const e = document.getElementById('qcount'); if (e) e.textContent = Math.max(qLeft, 0) + 's';
-    if (qLeft <= 0) { clearInterval(qTimer); endStream(); setQStatus('Time is up — the 30-second video has ended.'); }
+    setCountdown(qLeft - 1);
+    if (qLeft <= 0) {
+      clearInterval(qTimer); endStream();
+      setQStatus('Time is up — this Quality Proof has ended.');
+      setTimeout(closeQualitySilently, 1800);
+    }
   }, 1000);
 }
 
 function connectQuality(){
+  if (qws) { try { qws.onclose = null; qws.close(); } catch (e) {} qws = null; }
   qws = new WebSocket(`${wsScheme}://${location.host}/ws/quality/${RACE_ID}/`);
-  qws.onopen = () => setQStatus('Connected. Waiting for the other person…');
+  qws.onopen = () => { qAttempts = 0; setQStatus('Connected. Waiting for the other person…'); };
   qws.onmessage = async e => {
     const d = JSON.parse(e.data);
     if (d.type === 'ready') {
@@ -313,61 +351,107 @@ function connectQuality(){
       setQStatus(d.role === 'seller' ? 'Waiting for the customer to open the video…' : 'Connecting to the seller…');
       if (d.role === 'customer') qsend({ kind: 'hello' });
     } else if (d.type === 'denied') {
+      qClosing = true;
       setQStatus(d.message);
       toast(d.message);
       clearInterval(qTimer); endStream();
-      setTimeout(closeQuality, 1800);
+      setTimeout(closeQualitySilently, 1800);
     } else if (d.type === 'peer_join') {
-      setQStatus('The other person joined. Connecting video…');
-      // The customer greets again so a seller who joined late can start the stream.
-      if (IS_OWNER) setTimeout(() => qsend({ kind: 'hello' }), 250);
+      const otherRole = IS_OWNER ? 'seller' : 'customer';
+      if (d.role === otherRole) {
+        setQStatus('The other person joined. Connecting video…');
+        // The seller starts the offer as soon as the customer appears.
+        if (!IS_OWNER && localStream) setTimeout(() => { if (!pc) makeOffer(); }, 150);
+        else if (IS_OWNER) setTimeout(() => qsend({ kind: 'hello' }), 250);
+      }
     } else if (d.type === 'signal') {
       await onSignal(d);
     } else if (d.type === 'peer_left') {
-      setQStatus('The other person left the video.');
-      setTimeout(closeQuality, 1200);
+      if (IS_OWNER) {
+        setQStatus('The seller closed the video.');
+        setTimeout(closeQualitySilently, 1200);
+      } else {
+        // The customer closed their viewer. Keep the camera and session
+        // open so they can come straight back, but drop the old peer
+        // connection so a fresh offer can be made when they return.
+        if (pc) { try { pc.close(); } catch (e) {} pc = null; }
+        pendingIce = [];
+        setQStatus('The customer closed the video. Waiting for them to rejoin…');
+      }
+    } else if (d.type === 'stopped') {
+      clearInterval(qTimer); endStream();
+      setQStatus('The seller has finished the Quality Proof.');
+      setTimeout(closeQualitySilently, 1400);
     } else if (d.type === 'time_up') {
       clearInterval(qTimer); endStream();
-      setQStatus('Time is up — the 30-second video has ended.');
-      setTimeout(closeQuality, 1400);
+      setQStatus('Time is up — this Quality Proof has ended.');
+      setTimeout(closeQualitySilently, 1400);
     }
   };
-  qws.onclose = () => { if (document.getElementById('qmodal').classList.contains('show')) setQStatus('Video connection closed.'); };
+  qws.onclose = () => {
+    if (qClosing || !document.getElementById('qmodal').classList.contains('show')) return;
+    if (qAttempts >= 3) { setQStatus('The video connection closed. Tap Reconnect to try again.'); return; }
+    qAttempts += 1;
+    setQStatus('Connection lost. Reconnecting…');
+    setTimeout(connectQuality, 1500);
+  };
 }
 
 function makePC(){
   pc = new RTCPeerConnection(ICE);
   pc.onicecandidate = e => { if (e.candidate) qsend({ kind: 'ice', data: e.candidate }); };
-  pc.ontrack = e => { document.getElementById('qremote').srcObject = e.streams[0]; };
+  pc.ontrack = e => {
+    const remote = document.getElementById('qremote');
+    if (remote) { remote.srcObject = e.streams[0]; remote.play().catch(() => {}); }
+  };
   // Only the seller has a camera track. The customer just receives.
   if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
   pc.onconnectionstatechange = () => {
-    if (['failed', 'disconnected'].includes(pc.connectionState))
-      setQStatus('The video connection dropped. Try again on a stronger network.');
+    if (pc.connectionState === 'connected') {
+      setQStatus(IS_OWNER ? 'Live — you are watching the seller.' : 'Live — the customer can see your video.');
+    } else if (['failed', 'disconnected'].includes(pc.connectionState)) {
+      setQStatus('The video connection dropped. Reconnecting…');
+      clearTimeout(qRetryTimer);
+      qRetryTimer = setTimeout(() => {
+        if (document.getElementById('qmodal').classList.contains('show')) retryVideo();
+      }, 2500);
+    }
   };
 }
 
+async function flushIce(){
+  while (pc && pc.remoteDescription && pendingIce.length){
+    const candidate = pendingIce.shift();
+    try { await pc.addIceCandidate(candidate); } catch (e) {}
+  }
+}
+
 async function makeOffer(){
+  if (pc && pc.signalingState !== 'closed') return;
   makePC();
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
-  qsend({ kind: 'offer', data: offer });
+  qsend({ kind: 'offer', data: pc.localDescription });
 }
 
 async function onSignal(d){
   if (d.kind === 'hello') {
     // Seller answers the customer's greeting with a video offer.
-    if (!IS_OWNER && localStream && !pc) await makeOffer();
+    if (!IS_OWNER && localStream) await makeOffer();
   } else if (d.kind === 'offer') {
-    if (!pc) makePC();
+    if (pc) { try { pc.close(); } catch (e) {} pc = null; }
+    pendingIce = [];
+    makePC();
     await pc.setRemoteDescription(d.data);
+    await flushIce();
     const ans = await pc.createAnswer();
     await pc.setLocalDescription(ans);
-    qsend({ kind: 'answer', data: ans });
+    qsend({ kind: 'answer', data: pc.localDescription });
   } else if (d.kind === 'answer') {
-    if (pc) await pc.setRemoteDescription(d.data);
+    if (pc) { await pc.setRemoteDescription(d.data); await flushIce(); }
   } else if (d.kind === 'ice') {
-    if (pc) { try { await pc.addIceCandidate(d.data); } catch (e) {} }
+    if (!pc || !pc.remoteDescription) { pendingIce.push(d.data); return; }
+    try { await pc.addIceCandidate(d.data); } catch (e) {}
   }
 }
 
@@ -375,12 +459,49 @@ function endStream(){
   clearInterval(qTimer);
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
   if (pc) { try { pc.close(); } catch (e) {} pc = null; }
+  pendingIce = [];
+}
+
+async function retryVideo(){
+  clearTimeout(qRetryTimer);
+  qClosing = false; qAttempts = 0;
+  if (pc) { try { pc.close(); } catch (e) {} pc = null; }
+  pendingIce = [];
+  if (!IS_OWNER && !localStream) {
+    setQStatus('Restarting camera…');
+    try { await startCamera(); }
+    catch (e) { setQStatus('Camera permission is needed to show a live video.'); return; }
+  }
+  setQStatus('Reconnecting…');
+  connectQuality();
+}
+
+function stopQuality(){
+  // The seller finished showing the product: the server ends the session.
+  qClosing = true;
+  qsend({ kind: 'hangup' });
+  endStream();
+  if (qws) { try { qws.onclose = null; qws.close(); } catch (e) {} qws = null; }
+  hideQuality();
 }
 
 function closeQuality(){
+  // Closing the viewer. For a customer this does not end the seller's session.
+  qClosing = true;
   qsend({ kind: 'hangup' });
   endStream();
-  if (qws) { try { qws.close(); } catch (e) {} qws = null; }
+  if (qws) { try { qws.onclose = null; qws.close(); } catch (e) {} qws = null; }
+  hideQuality();
+}
+
+function closeQualitySilently(){
+  qClosing = true;
+  endStream();
+  if (qws) { try { qws.onclose = null; qws.close(); } catch (e) {} qws = null; }
+  hideQuality();
+}
+
+function hideQuality(){
   const m = document.getElementById('qmodal'); if (m) m.classList.remove('show');
   const r = document.getElementById('qremote'); if (r) r.srcObject = null;
   const l = document.getElementById('qlocal'); if (l) l.srcObject = null;

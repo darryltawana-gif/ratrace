@@ -40,6 +40,25 @@ def _raw_has_ai_signature(f, limit=4 * 1024 * 1024):
     return any(sig in low for sig in AI_SIGNATURES)
 
 
+def _looks_like_image(head):
+    """Accept the formats phones actually produce, including HEIC/HEIF."""
+    if head.startswith(b"\xff\xd8\xff"):
+        return True
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+    if head.startswith((b"GIF87a", b"GIF89a", b"BM")):
+        return True
+    if head.startswith((b"II*\x00", b"MM\x00*")):
+        return True
+    if len(head) >= 12 and head.startswith(b"RIFF") and head[8:12] == b"WEBP":
+        return True
+    if len(head) >= 12 and head[4:8] == b"ftyp":
+        brand = head[8:12].lower()
+        return brand in (b"heic", b"heix", b"hevc", b"hevx", b"mif1",
+                         b"msf1", b"avif", b"avis")
+    return False
+
+
 def _image_info(f):
     """Return (verified, ai_signature, exif_software_text)."""
     from PIL import Image
@@ -81,6 +100,11 @@ def inspect_image(f):
     if f.size > MAX_IMAGE_BYTES:
         raise ValidationError("That photo is too large. Please use one under 12 MB.")
     f.seek(0)
+    head = f.read(32)
+    f.seek(0)
+    if not _looks_like_image(head):
+        raise ValidationError(
+            "That file is not a photo. Please upload an image taken with your phone camera.")
     if _raw_has_ai_signature(f):
         raise ValidationError(
             "This looks like an AI-generated image. Please upload an original photo taken with your phone camera.")

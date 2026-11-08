@@ -222,10 +222,11 @@ class Participant(models.Model):
 
 
 class QualitySession(models.Model):
-    """One 30-second Quality Proof window per seller in a race.
+    """One Quality Proof window per seller in a race.
 
     The clock starts on the server when the seller starts the proof, so
-    reconnecting the camera or refreshing the page cannot reset it.
+    reconnecting the camera or refreshing the page cannot reset it. The
+    window length lives in ``settings.QUALITY_SECONDS`` (48 minutes).
     """
     race = models.ForeignKey(Race, on_delete=models.CASCADE, related_name="quality_sessions")
     seller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
@@ -242,7 +243,8 @@ class QualitySession(models.Model):
 
     @property
     def ends_at(self):
-        return self.started_at + timedelta(seconds=30)
+        return self.started_at + timedelta(
+            seconds=getattr(settings, "QUALITY_SECONDS", 48 * 60))
 
     def seconds_left(self):
         if self.ended_at:
@@ -271,12 +273,21 @@ class Post(models.Model):
 
 
 class Circle(models.Model):
-    """A customer's trusted sellers."""
+    """A customer's trusted sellers.
+
+    ``current_topic`` is chosen by the customer and stays in force until the
+    customer changes it. Sellers always talk inside the customer's topic.
+    """
     customer = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="circle")
+    current_topic = models.CharField(max_length=20, choices=CIRCLE_TOPICS, default="other")
     created = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Circle of {self.customer.username}"
+
+    @property
+    def current_topic_label(self):
+        return dict(CIRCLE_TOPICS).get(self.current_topic, "Any other talks")
 
     def accepted_members(self):
         return self.members.filter(status="accepted").select_related("seller__profile")

@@ -236,6 +236,7 @@ def race_room(request, race_id):
         "review_seller": race.winner.seller if race.winner else None,
         "end_message": sv.end_message(race) if race.status != "open" else "",
         "quality_seconds": sv.QUALITY_SECONDS,
+        "ice_servers": sv.ice_servers(),
     })
 
 
@@ -583,6 +584,24 @@ def circle_respond(request, member_id, action):
     return redirect("my_circle")
 
 
+@require_POST
+@login_required
+def circle_remove(request, member_id):
+    """A customer can remove a seller from their Circle at any time."""
+    member = get_object_or_404(CircleMember, pk=member_id, circle__customer=request.user)
+    seller_id = member.seller_id
+    seller_name = member.seller.username
+    circle_id = member.circle_id
+    member.delete()
+    sv.broadcast(f"user_{seller_id}", {
+        "type": "chat_request", "room_id": 0, "url": reverse("my_circle"),
+        "message": f"👋 {request.user.username} removed you from their Circle."})
+    sv.broadcast(f"circle_{circle_id}", {
+        "type": "system", "message": f"{seller_name} was removed from the Circle."})
+    messages.success(request, f"{seller_name} was removed from your Circle.")
+    return redirect("my_circle")
+
+
 @login_required
 def circle_chat(request, circle_id):
     circle = get_object_or_404(Circle.objects.select_related("customer__profile"), pk=circle_id)
@@ -594,6 +613,8 @@ def circle_chat(request, circle_id):
     return render(request, "circle_chat.html", {
         "circle": circle, "members": members, "is_owner": is_owner,
         "topics": CIRCLE_TOPICS, "circle_id": circle.id,
+        "current_topic": circle.current_topic,
+        "current_topic_label": circle.current_topic_label,
     })
 
 
@@ -601,13 +622,21 @@ def circle_chat(request, circle_id):
 @login_required
 def circle_talk(request, circle_id):
     circle = get_object_or_404(Circle, pk=circle_id, customer=request.user)
-    topic = request.POST.get("topic", "other")
-    label = dict(CIRCLE_TOPICS).get(topic, "Any other talks")
+    topic = request.POST.get("topic", "")
+    if topic not in dict(CIRCLE_TOPICS):
+        messages.error(request, "Choose one of the Circle topics.")
+        return redirect("circle_chat", circle.id)
+    label = dict(CIRCLE_TOPICS)[topic]
+    changed = sv.set_circle_topic(request.user, circle.id, topic)
     msg = CircleMessage.objects.create(
         circle=circle, sender=request.user, topic=topic,
         text=f"Let's talk: {label}.")
     sv.broadcast(f"circle_{circle.id}",
                  {"type": "message", "message": sv.circle_message_dict(msg)})
+    if changed:
+        sv.broadcast(f"circle_{circle.id}",
+                     {"type": "topic", "topic": topic, "label": label,
+                      "by": request.user.username})
     for uid in sv.circle_recipient_ids(circle.id, exclude=request.user.id):
         sv.broadcast(f"user_{uid}", {"type": "chat_message", "room_id": circle.id,
                                      "message": f"👥 {request.user.username} started a topic: {label}",

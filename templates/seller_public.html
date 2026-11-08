@@ -75,12 +75,13 @@
   {% for p in posts %}
   <div class="post-card">
     {% if p.image %}<a href="{{ p.image.url }}" target="_blank"><img src="{{ p.image.url }}" alt="{{ p.title }}"></a>
-    {% elif p.video %}<video src="{{ p.video.url }}" controls preload="metadata"></video>{% endif %}
+    {% elif p.video %}<video src="{{ p.video.url }}" controls preload="metadata"></video>
+    {% else %}<div style="display:flex;align-items:center;justify-content:center;min-height:120px;font-size:2rem;background:#f3f6fc;border-radius:12px 12px 0 0">🛍</div>{% endif %}
     <div class="pc-body">
       <h4>{{ p.title }}</h4>
       {% if p.price %}<b style="color:#16a34a">{{ p.price }}</b>{% endif %}
       <span class="muted" style="font-size:.86rem">{{ p.description|truncatechars:120 }}</span>
-      {% if not p.media_verified %}<span class="tag unverified" style="align-self:flex-start">Unverified media</span>{% endif %}
+      {% if p.image or p.video %}{% if not p.media_verified %}<span class="tag unverified" style="align-self:flex-start">Unverified media</span>{% endif %}{% endif %}
     </div>
   </div>
   {% endfor %}

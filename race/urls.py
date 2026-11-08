@@ -23,6 +23,7 @@ urlpatterns = [
     path("circle/", views.my_circle, name="my_circle"),
     path("circle/request/<int:seller_id>/", views.circle_request, name="circle_request"),
     path("circle/respond/<int:member_id>/<str:action>/", views.circle_respond, name="circle_respond"),
+    path("circle/remove/<int:member_id>/", views.circle_remove, name="circle_remove"),
     path("circle/chat/<int:circle_id>/", views.circle_chat, name="circle_chat"),
     path("circle/talk/<int:circle_id>/", views.circle_talk, name="circle_talk"),
     path("report/<int:seller_id>/", views.report_seller, name="report_seller"),

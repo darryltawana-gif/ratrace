@@ -2,7 +2,7 @@
 {% block content %}
 <div class="card narrow">
   <h2>New post</h2>
-  <p class="muted">Add a real photo or a short video taken with your phone. AI-generated media is rejected.</p>
+  <p class="muted">Add a real photo or a short video taken with your phone. AI-generated media is rejected. Media is recommended but not required.</p>
   <form method="post" enctype="multipart/form-data">{% csrf_token %}
     {{ form.non_field_errors }}
     {% for field in form %}

@@ -6,8 +6,9 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from . import services as sv
-from .models import (AccountGroup, AccountIdentity, CircleMember, Participant,
-                     Profile, QualitySession, Race, Report, Review)
+from .models import (AccountGroup, AccountIdentity, Circle, CircleMember,
+                     Participant, Post, Profile, QualitySession, Race, Report,
+                     Review)
 
 
 def make_user(username, role="customer", email="", phone=""):
@@ -31,6 +32,8 @@ class HomePageTests(TestCase):
         self.assertContains(response, "Hall of Fame")
         self.assertContains(response, "My Circle")
         self.assertNotContains(response, "My Posts")
+        self.assertContains(response, "#f2c200")
+        self.assertNotContains(response, "#8ff0c4")
 
     def test_customer_home_renders(self):
         self.client.force_login(self.customer)
@@ -192,12 +195,92 @@ class QualitySessionTests(TestCase):
     def test_window_expires_on_server_clock(self):
         session = sv.start_quality_session(self.seller, self.race.id)
         QualitySession.objects.filter(pk=session.id).update(
-            started_at=timezone.now() - timedelta(seconds=31))
+            started_at=timezone.now() - timedelta(seconds=sv.QUALITY_SECONDS + 1))
         self.assertIsNone(sv.start_quality_session(self.seller, self.race.id))
         self.assertIsNone(sv.quality_for_race(self.race.id))
+
+    def test_quality_window_is_48_minutes(self):
+        self.assertEqual(sv.QUALITY_SECONDS, 48 * 60)
+        session = sv.start_quality_session(self.seller, self.race.id)
+        self.assertEqual(int((session.ends_at - session.started_at).total_seconds()), 48 * 60)
 
     def test_only_participant_seller_can_stream(self):
         self.assertTrue(sv.can_stream_quality(self.seller, self.race.id))
         self.assertTrue(sv.can_stream_quality(self.customer, self.race.id))
         stranger = make_user("qstranger")
         self.assertFalse(sv.can_stream_quality(stranger, self.race.id))
+
+
+class CircleTests(TestCase):
+    def setUp(self):
+        self.customer = make_user("circlebuyer", "customer")
+        self.seller = make_user("circleseller", "seller")
+        self.other = make_user("circleother", "seller")
+        self.circle = sv.ensure_circle(self.customer)
+        self.member = CircleMember.objects.create(
+            circle=self.circle, seller=self.seller, status="accepted")
+
+    def test_customer_can_remove_a_member(self):
+        self.client.force_login(self.customer)
+        response = self.client.post(f"/circle/remove/{self.member.id}/")
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(CircleMember.objects.filter(pk=self.member.id).exists())
+
+    def test_seller_cannot_remove_a_member(self):
+        self.client.force_login(self.seller)
+        response = self.client.post(f"/circle/remove/{self.member.id}/")
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(CircleMember.objects.filter(pk=self.member.id).exists())
+
+    def test_customer_topic_persists_and_seller_cannot_change_it(self):
+        first = sv.save_circle_message(self.customer, self.circle.id, "Hello all", "jokes")
+        self.assertEqual(first["message"]["topic"], "jokes")
+        self.circle.refresh_from_db()
+        self.assertEqual(self.circle.current_topic, "jokes")
+
+        # A seller trying to choose a topic is ignored.
+        reply = sv.save_circle_message(self.seller, self.circle.id, "A joke for you", "products")
+        self.circle.refresh_from_db()
+        self.assertEqual(self.circle.current_topic, "jokes")
+        self.assertEqual(reply["message"]["topic"], "jokes")
+        self.assertIsNone(sv.set_circle_topic(self.seller, self.circle.id, "products"))
+
+        # The customer can change the topic mid-conversation.
+        changed = sv.save_circle_message(self.customer, self.circle.id, "New topic", "products")
+        self.circle.refresh_from_db()
+        self.assertEqual(self.circle.current_topic, "products")
+        self.assertEqual(changed["topic_changed"], "products")
+
+        later = sv.save_circle_message(self.seller, self.circle.id, "About my products", "")
+        self.assertEqual(later["message"]["topic"], "products")
+
+
+class PostTests(TestCase):
+    def setUp(self):
+        self.seller = make_user("postseller", "seller")
+        self.customer = make_user("postbuyer", "customer")
+
+    def test_seller_can_post_without_media(self):
+        self.client.force_login(self.seller)
+        response = self.client.post("/posts/new/", {
+            "title": "Handmade bag", "description": "New stock", "price": "25.00"})
+        self.assertEqual(response.status_code, 302)
+        post = Post.objects.get(title="Handmade bag")
+        self.assertEqual(post.seller, self.seller)
+        self.assertTrue(post.active)
+
+    def test_seller_can_remove_own_post(self):
+        post = Post.objects.create(seller=self.seller, title="Old stock")
+        self.client.force_login(self.seller)
+        response = self.client.post(f"/posts/{post.id}/delete/")
+        self.assertEqual(response.status_code, 302)
+        post.refresh_from_db()
+        self.assertFalse(post.active)
+
+    def test_seller_cannot_remove_someone_elses_post(self):
+        post = Post.objects.create(seller=self.seller, title="Mine")
+        self.client.force_login(self.customer)
+        response = self.client.post(f"/posts/{post.id}/delete/")
+        self.assertEqual(response.status_code, 404)
+        post.refresh_from_db()
+        self.assertTrue(post.active)

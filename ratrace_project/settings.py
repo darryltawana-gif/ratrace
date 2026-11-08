@@ -86,6 +86,24 @@ ASGI_APPLICATION = "ratrace_project.asgi.application"
 CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}} 
 
 
+# ---------------------------- Quality Proof video ----------------------------
+# A seller's live Quality Proof window. The server owns this clock.
+QUALITY_SECONDS = int(os.environ.get("QUALITY_SECONDS", 48 * 60))
+
+# WebRTC ICE servers. STUN works on most home networks; TURN is required on
+# mobile data and strict office networks. Set these environment variables to
+# your own TURN credentials in production (for example Metered, Twilio or
+# Cloudflare). Never hardcode private credentials in the repository.
+STUN_URLS = [u.strip() for u in os.environ.get(
+    "STUN_URLS",
+    "stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302,stun:stun.cloudflare.com:3478"
+).split(",") if u.strip()]
+TURN_URLS = [u.strip() for u in os.environ.get(
+    "TURN_URLS", os.environ.get("TURN_URL", "")).split(",") if u.strip()]
+TURN_USERNAME = os.environ.get("TURN_USERNAME", "")
+TURN_CREDENTIAL = os.environ.get("TURN_CREDENTIAL", "")
+
+
 LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"

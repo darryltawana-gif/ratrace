@@ -6,7 +6,7 @@
  @media (max-width:760px){.hero3d{padding:24px 16px;text-align:center}}
  .hero3d h1{color:#fff;font-size:2.9rem;margin:0}
  .hero3d h1 span{color:#ff5470}
- .tagline{color:#8ff0c4;font-weight:800;font-size:1.16rem;max-width:560px;margin:.5em auto 1.1em;line-height:1.4;
+ .tagline{color:#f2c200;font-weight:800;font-size:1.16rem;max-width:560px;margin:.5em auto 1.1em;line-height:1.4;
    text-shadow:0 1px 0 rgba(0,0,0,.18)}
  .hero-actions{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap}
  .live-pill{display:inline-flex;align-items:center;gap:8px;background:#e3f6ea;border:1px solid #9dd8b3;
@@ -98,7 +98,7 @@
     {% else %}<div class="avatar ph">🎬</div>{% endif %}
     <span class="nm">{{ p.title }}</span>
     {% if p.price %}<span class="cat">{{ p.price }}</span>{% endif %}
-    {% if not p.media_verified %}<span class="wins">Unverified media</span>{% endif %}
+    {% if p.image or p.video %}{% if not p.media_verified %}<span class="wins">Unverified media</span>{% endif %}{% endif %}
   </a>
   {% endfor %}
 </div>

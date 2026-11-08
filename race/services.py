@@ -14,11 +14,34 @@ from django.utils import timezone
 from .models import (Race, Participant, Profile, ChatRoom, ChatMessage,
                      Post, Circle, CircleMember, CircleMessage, PushSubscription,
                      AccountGroup, AccountIdentity, QualitySession,
-                     MAX_SELLERS, RACE_MINUTES, CIRCLE_TOPIC_KEYS)
+                     MAX_SELLERS, RACE_MINUTES, CIRCLE_TOPICS, CIRCLE_TOPIC_KEYS)
 
 log = logging.getLogger(__name__)
 MAX_DISCOUNT = 50
-QUALITY_SECONDS = 30
+QUALITY_SECONDS = getattr(settings, "QUALITY_SECONDS", 48 * 60)
+
+
+def ice_servers():
+    """The ICE server list handed to the browser for WebRTC.
+
+    STUN is enough on many home networks but fails on mobile data. TURN is
+    configured with environment variables so real credentials are never
+    committed to the repository.
+    """
+    servers = [{"urls": url} for url in getattr(settings, "STUN_URLS", [])]
+    turn_urls = getattr(settings, "TURN_URLS", [])
+    if turn_urls:
+        server = {"urls": turn_urls}
+        username = getattr(settings, "TURN_USERNAME", "")
+        credential = getattr(settings, "TURN_CREDENTIAL", "")
+        if username:
+            server["username"] = username
+        if credential:
+            server["credential"] = credential
+        servers.append(server)
+    if not servers:
+        servers = [{"urls": "stun:stun.l.google.com:19302"}]
+    return servers
 
 
 def broadcast(group, payload):
@@ -280,7 +303,6 @@ def pending_requests(user):
 
 
 def circle_message_dict(m):
-    from .models import CIRCLE_TOPICS
     return {"id": m.id, "sender_id": m.sender_id,
             "sender": m.sender.username if m.sender else "System",
             "topic": m.topic, "topic_label": dict(CIRCLE_TOPICS).get(m.topic, "Any other talks"),
@@ -292,14 +314,34 @@ def circle_history(circle_id, limit=200):
     return [circle_message_dict(m) for m in reversed(list(qs))]
 
 
-def save_circle_message(user, circle_id, text, topic="other"):
+def set_circle_topic(user, circle_id, topic):
+    """Only the customer may choose the topic, and it stays until changed."""
+    if topic not in CIRCLE_TOPIC_KEYS:
+        return None
+    circle = Circle.objects.filter(pk=circle_id, customer=user).first()
+    if not circle:
+        return None
+    if circle.current_topic != topic:
+        circle.current_topic = topic
+        circle.save(update_fields=["current_topic"])
+    return {"topic": topic, "label": dict(CIRCLE_TOPICS).get(topic, "Any other talks"),
+            "by": user.username}
+
+
+def save_circle_message(user, circle_id, text, topic=""):
     circle = Circle.objects.filter(pk=circle_id).first()
     if not circle or not is_circle_member(circle, user):
         return None
-    if topic not in CIRCLE_TOPIC_KEYS:
-        topic = "other"
-    m = CircleMessage.objects.create(circle=circle, sender=user, text=text[:1000], topic=topic)
-    return {"message": circle_message_dict(m)}
+    # A topic sent by a seller is deliberately ignored: the customer owns it.
+    changed = None
+    if user.id == circle.customer_id and topic in CIRCLE_TOPIC_KEYS:
+        if topic != circle.current_topic:
+            circle.current_topic = topic
+            circle.save(update_fields=["current_topic"])
+            changed = topic
+    used_topic = circle.current_topic if circle.current_topic in CIRCLE_TOPIC_KEYS else "other"
+    m = CircleMessage.objects.create(circle=circle, sender=user, text=text[:1000], topic=used_topic)
+    return {"message": circle_message_dict(m), "topic_changed": changed}
 
 
 def get_circle(circle_id):
@@ -341,7 +383,7 @@ def race_role(user, race_id):
 
 
 def start_quality_session(user, race_id):
-    """Start (or resume) the single 30-second proof this seller gets per race."""
+    """Start (or resume) the single Quality Proof this seller gets per race."""
     race = Race.objects.filter(pk=race_id, status="open", expires_at__gt=timezone.now()).first()
     if not race or not race.participants.filter(seller=user, active=True).exists():
         return None

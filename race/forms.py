@@ -194,6 +194,12 @@ class ProfileForm(forms.ModelForm):
 
 
 class PostForm(forms.ModelForm):
+    # Plain FileField so phone formats Pillow cannot read (HEIC/HEIF) are
+    # still accepted; inspect_image() checks the real file signature.
+    image = forms.FileField(
+        required=False, label="Photo (taken with your phone)",
+        widget=forms.FileInput(attrs={"accept": "image/*"}))
+
     class Meta:
         model = Post
         fields = ["title", "description", "price", "image", "video"]
@@ -227,12 +233,6 @@ class PostForm(forms.ModelForm):
         if f:
             inspect_video(f)
         return f
-
-    def clean(self):
-        cd = super().clean()
-        if not cd.get("image") and not cd.get("video"):
-            raise forms.ValidationError("Add at least a photo or a short video of what you are selling.")
-        return cd
 
 
 class CircleMessageForm(forms.ModelForm):

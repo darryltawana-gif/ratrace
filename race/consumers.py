@@ -68,7 +68,7 @@ class RaceConsumer(Base):
                 user, self.race_id, str(content.get("text", "")))
         elif action == "quality_request":
             # Seller asks the customer to watch a live Quality Proof video.
-            # The server owns the clock and allows one 30-second window per race.
+            # The server owns the clock and allows one 48-minute window per race.
             session = await database_sync_to_async(services.start_quality_session)(user, self.race_id)
             if session:
                 await self.channel_layer.group_send(self.group, {
@@ -79,7 +79,7 @@ class RaceConsumer(Base):
             else:
                 await self.send_json({
                     "type": "quality_denied",
-                    "message": "Your 30-second Quality Proof for this race has already been used."})
+                    "message": "Your Quality Proof for this race has already been used."})
         if ok:
             state = await database_sync_to_async(services.race_state)(self.race_id)
             await self.channel_layer.group_send(
@@ -87,10 +87,11 @@ class RaceConsumer(Base):
 
 
 class QualityConsumer(Base):
-    """WebRTC signalling for the 30-second Quality Proof video.
+    """WebRTC signalling for the Quality Proof video.
 
     The timer is based on the server-side QualitySession started by the
-    seller. Reconnecting never gives a fresh 30 seconds.
+    seller. Reconnecting never gives a fresh window. Only the seller can end
+    the session; a customer closing the viewer just leaves the stream.
     """
     async def connect(self):
         self.race_id = self.scope["url_route"]["kwargs"]["race_id"]
@@ -120,7 +121,8 @@ class QualityConsumer(Base):
         await self.channel_layer.group_add(self.group, self.channel_name)
         await self.accept()
         await self.send_json({"type": "ready", "role": self.role,
-                              "seconds": self.seconds_left})
+                              "seconds": self.seconds_left,
+                              "session_id": self.session_id})
         await self.channel_layer.group_send(
             self.group, {"type": "relay", "payload": {"type": "peer_join", "role": self.role}})
         # Both sides get the same countdown, measured from the seller's start.
@@ -153,12 +155,20 @@ class QualityConsumer(Base):
         if kind not in ("hello", "offer", "answer", "ice", "hangup"):
             return
         if kind == "hangup":
-            if getattr(self, "session_id", None):
-                await database_sync_to_async(services.end_quality_session)(self.session_id)
-            await self.channel_layer.group_send(
-                self.group, {"type": "relay", "payload": {"type": "peer_left", "role": self.role}})
-            await self.channel_layer.group_send(
-                f"race_{self.race_id}", {"type": "relay", "payload": {"type": "quality_over"}})
+            if self.role == "seller":
+                # The seller finished showing the product: the proof is over.
+                if getattr(self, "session_id", None):
+                    await database_sync_to_async(services.end_quality_session)(self.session_id)
+                await self.channel_layer.group_send(
+                    self.group, {"type": "relay", "payload": {"type": "stopped"}})
+                await self.channel_layer.group_send(
+                    f"race_{self.race_id}", {"type": "relay", "payload": {"type": "quality_over"}})
+            else:
+                # The customer closed their viewer. The seller keeps the
+                # session open and can show the product again when they return.
+                await self.channel_layer.group_send(
+                    self.group,
+                    {"type": "relay", "payload": {"type": "peer_left", "role": self.role}})
             return
         await self.channel_layer.group_send(self.group, {
             "type": "relay",
@@ -183,15 +193,28 @@ class CircleConsumer(Base):
         await self.channel_layer.group_add(self.group, self.channel_name)
         await self.accept()
         history = await database_sync_to_async(services.circle_history)(self.circle_id)
-        await self.send_json({"type": "history", "messages": history})
+        await self.send_json({"type": "history", "messages": history,
+                              "topic": circle.current_topic,
+                              "topic_label": circle.current_topic_label,
+                              "is_owner": circle.customer_id == user.id})
 
     async def disconnect(self, code):
         if hasattr(self, "group"):
             await self.channel_layer.group_discard(self.group, self.channel_name)
 
     async def receive_json(self, content):
+        # The customer chooses the topic; it then applies to every message
+        # until the customer changes it again.
+        if content.get("action") == "topic":
+            topic = str(content.get("topic", ""))
+            res = await database_sync_to_async(services.set_circle_topic)(
+                self.user, self.circle_id, topic)
+            if res:
+                await self.channel_layer.group_send(
+                    self.group, {"type": "relay", "payload": {"type": "topic", **res}})
+            return
         text = str(content.get("text", "")).strip()[:1000]
-        topic = str(content.get("topic", "other"))
+        topic = str(content.get("topic", ""))
         if not text:
             return
         res = await database_sync_to_async(services.save_circle_message)(
@@ -200,6 +223,12 @@ class CircleConsumer(Base):
             return
         await self.channel_layer.group_send(
             self.group, {"type": "relay", "payload": {"type": "message", "message": res["message"]}})
+        if res.get("topic_changed"):
+            await self.channel_layer.group_send(
+                self.group, {"type": "relay", "payload": {
+                    "type": "topic", "topic": res["topic_changed"],
+                    "label": dict(services.CIRCLE_TOPICS).get(res["topic_changed"], "Any other talks"),
+                    "by": self.user.username}})
         # Wake up accepted members who are elsewhere on the site.
         recipients = await database_sync_to_async(services.circle_recipient_ids)(
             self.circle_id, exclude=self.user.id)

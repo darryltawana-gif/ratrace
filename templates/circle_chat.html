@@ -9,9 +9,12 @@
  .chathead .btn.ghost{background:transparent;border-color:#6f8cc9;color:#fff}
  .memstrip{display:flex;gap:6px;overflow-x:auto;padding:10px 14px;background:#f7f9fe;border-bottom:1px solid var(--border)}
  .memstrip img,.memstrip .ph{width:34px;height:34px;border-radius:50%;object-fit:cover;border:2px solid #d90429;flex:none;background:#eaf0fc;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.8rem;color:#0b1f4b}
- .topics{display:flex;gap:6px;overflow-x:auto;padding:8px 14px;border-bottom:1px solid var(--border);background:#fff}
+ .topics{display:flex;gap:6px;overflow-x:auto;padding:8px 14px;border-bottom:1px solid var(--border);background:#fff;align-items:center}
  .topics .tbtn{border:1px solid #d9e1f1;background:#f7f9fe;border-radius:999px;padding:6px 12px;font-size:.82rem;font-weight:700;white-space:nowrap;cursor:pointer;color:#0b1f4b}
  .topics .tbtn:hover{border-color:#d90429;color:#d90429}
+ .topics .tbtn.active{background:#0b1f4b;border-color:#0b1f4b;color:#fff}
+ .topics .topic-now{font-size:.86rem;color:#5a6a8c;padding:5px 2px}
+ .topics .topic-now b{color:#0b1f4b}
  .msgs{display:flex;flex-direction:column;gap:8px;padding:14px;overflow-y:auto;height:52vh;max-height:520px;min-height:260px;background:#f3f6fc}
  .bub{max-width:80%;padding:9px 13px;border-radius:16px;word-wrap:break-word;overflow-wrap:anywhere;white-space:pre-wrap}
  .bub .nm{font-size:.72rem;font-weight:800;opacity:.8;margin-bottom:2px}
@@ -26,7 +29,9 @@
  @media (max-width:560px){.composer select{max-width:100%;order:-1;width:100%}}
 </style>
 
-<div id="cfg" hidden data-circle="{{ circle.id }}" data-me="{{ request.user.id }}"></div>
+<div id="cfg" hidden data-circle="{{ circle.id }}" data-me="{{ request.user.id }}"
+     data-owner="{% if is_owner %}1{% else %}0{% endif %}"
+     data-topic="{{ current_topic }}" data-topic-label="{{ current_topic_label }}"></div>
 
 <div class="chatwrap">
   <div class="chathead">
@@ -45,17 +50,24 @@
   </div>
 
   <div class="topics">
-    {% for key, label in topics %}
-      <button class="tbtn" type="button" data-topic="{{ key }}" data-label="{{ label }}">{% if key == 'common' %}🎬{% elif key == 'jokes' %}😂{% elif key == 'products' %}🛍{% else %}💬{% endif %} {{ label }}</button>
-    {% endfor %}
+    {% if is_owner %}
+      <span class="topic-now" style="margin-right:2px">Topic:</span>
+      {% for key, label in topics %}
+        <button class="tbtn{% if key == current_topic %} active{% endif %}" type="button" data-topic="{{ key }}" data-label="{{ label }}">{% if key == 'common' %}🎬{% elif key == 'jokes' %}😂{% elif key == 'products' %}🛍{% else %}💬{% endif %} {{ label }}</button>
+      {% endfor %}
+    {% else %}
+      <span class="topic-now">💬 Topic chosen by the customer: <b id="topicNow">{{ current_topic_label }}</b></span>
+    {% endif %}
   </div>
 
   <div id="msgs" class="msgs"></div>
 
   <div class="composer">
+    {% if is_owner %}
     <select id="topic" title="Topic">
-      {% for key, label in topics %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+      {% for key, label in topics %}<option value="{{ key }}"{% if key == current_topic %} selected{% endif %}>{{ label }}</option>{% endfor %}
     </select>
+    {% endif %}
     <textarea id="box" rows="1" maxlength="1000" placeholder="Message your Circle…  (Enter to send)"></textarea>
     <button id="send" type="button" class="btn" disabled>Send</button>
   </div>
@@ -66,12 +78,28 @@
 <script>
 const cfg = document.getElementById('cfg').dataset;
 const CIRCLE = Number(cfg.circle), ME = Number(cfg.me);
+const IS_OWNER = cfg.owner === '1';
 const list = document.getElementById('msgs'), box = document.getElementById('box');
 const sendBtn = document.getElementById('send'), statusEl = document.getElementById('status');
 const topicEl = document.getElementById('topic');
 let ws = null, seen = new Set(), lastDay = '';
+let currentTopic = cfg.topic || 'other';
 
 function atBottom(){ return list.scrollHeight - list.scrollTop - list.clientHeight < 90; }
+function applyTopic(key, label){
+  if (!key) return;
+  currentTopic = key;
+  document.querySelectorAll('.tbtn').forEach(b => b.classList.toggle('active', b.dataset.topic === key));
+  if (topicEl) topicEl.value = key;
+  const now = document.getElementById('topicNow');
+  if (now && label) now.textContent = label;
+  if (label) box.placeholder = 'Message your Circle about ' + label + '…  (Enter to send)';
+}
+function addSystem(text){
+  if (!text) return;
+  const s = document.createElement('div'); s.className = 'sys'; s.textContent = text;
+  list.appendChild(s); list.scrollTop = list.scrollHeight;
+}
 function addMsg(m, stick){
   if (seen.has(m.id)) return; seen.add(m.id);
   const d = new Date(m.created), day = d.toDateString();
@@ -101,15 +129,20 @@ function connect(){
     if (d.type === 'history'){
       list.innerHTML = ''; seen.clear(); lastDay = '';
       d.messages.forEach(m => addMsg(m, false));
+      applyTopic(d.topic, d.topic_label);
       list.scrollTop = list.scrollHeight;
     } else if (d.type === 'message'){ addMsg(d.message, atBottom() || d.message.sender_id === ME); }
+    else if (d.type === 'topic'){ applyTopic(d.topic, d.label); }
+    else if (d.type === 'system'){ addSystem(d.message); }
   };
   ws.onclose = () => { setStatus(false); setTimeout(connect, 2000); };
 }
 function sendMsg(){
   const t = box.value.trim();
   if (!t || !ws || ws.readyState !== 1) return;
-  ws.send(JSON.stringify({text: t, topic: topicEl.value}));
+  const payload = {text: t};
+  if (IS_OWNER && topicEl) payload.topic = topicEl.value;
+  ws.send(JSON.stringify(payload));
   box.value = ''; grow(); box.focus();
 }
 function grow(){ box.style.height = 'auto'; box.style.height = Math.min(box.scrollHeight, 120) + 'px'; }
@@ -117,10 +150,12 @@ sendBtn.onclick = sendMsg;
 box.addEventListener('input', grow);
 box.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); sendMsg(); } });
 document.querySelectorAll('.tbtn').forEach(b => b.onclick = () => {
-  topicEl.value = b.dataset.topic;
-  box.value = 'Let\'s talk: ' + b.dataset.label + '. ';
-  grow(); box.focus();
+  if (!IS_OWNER || !ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({action:'topic', topic:b.dataset.topic}));
+  applyTopic(b.dataset.topic, b.dataset.label);
+  box.focus();
 });
+applyTopic(currentTopic, cfg.topicLabel);
 connect();
 </script>
 {% endblock %}

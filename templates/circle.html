@@ -7,6 +7,8 @@
  .member .who{flex:1;min-width:0}
  .member .who b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  .member .who span{font-size:.76rem;color:#5a6a8c}
+ .member .open{display:flex;gap:10px;align-items:center;flex:1;min-width:0;text-decoration:none;color:inherit}
+ .member .rm-btn{padding:7px 12px;font-size:.84rem;white-space:nowrap}
  .topic-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
  @media (max-width:600px){.topic-grid{grid-template-columns:1fr}}
  .topic-btn{display:flex;align-items:center;gap:10px;justify-content:flex-start;text-align:left;background:#f7f9fe;border:1.5px solid #c5d0ea;
@@ -38,11 +40,16 @@
 {% if members %}
 <div class="member-grid">
   {% for m in members %}
-  <a class="member" href="{% url 'seller_public' m.user.id %}" style="text-decoration:none;color:inherit">
-    {% if m.photo %}<img class="avatar" src="{{ m.photo }}" alt="">{% else %}<div class="avatar ph">{{ m.name|slice:":1"|upper }}</div>{% endif %}
-    <span class="who"><b>{{ m.name }}</b><span>{{ m.category|default:"Seller" }}</span></span>
-    <span class="tag">✓</span>
-  </a>
+  <div class="member">
+    <a class="open" href="{% url 'seller_public' m.user.id %}">
+      {% if m.photo %}<img class="avatar" src="{{ m.photo }}" alt="">{% else %}<div class="avatar ph">{{ m.name|slice:":1"|upper }}</div>{% endif %}
+      <span class="who"><b>{{ m.name }}</b><span>{{ m.category|default:"Seller" }}</span></span>
+    </a>
+    <form method="post" action="{% url 'circle_remove' m.id %}" style="margin:0"
+          onsubmit="return confirm('Remove {{ m.name|escapejs }} from your Circle?')">{% csrf_token %}
+      <button class="btn danger rm-btn" title="Remove from my Circle">Remove</button>
+    </form>
+  </div>
   {% endfor %}
 </div>
 {% else %}
