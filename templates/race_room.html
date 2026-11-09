@@ -11,6 +11,13 @@
  .actions form{margin:0}
  .lane-head{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
  .lane.won{border:2px solid #d90429}
+ .seller-link{color:#0b1f4b;text-decoration:none}
+ .seller-link:hover{text-decoration:underline}
+ .seller-avatar-link{display:inline-flex;flex:none}
+ .seller-profile{text-decoration:none}
+ .presence-chip.viewing{background:#e7f8ee;border-color:#16a34a;color:#0b6b34}
+ .presence-chip.viewed{background:#eef4ff;border-color:#3b6fd4;color:#1e3f8f}
+ .presence-chip.unseen{background:#fff7e6;border-color:#d9a300;color:#8a5a00}
  .seller-box{border-top:1px solid #d9e1f1;margin-top:12px;padding-top:10px}
  .overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(11,31,75,.9);z-index:100;align-items:center;justify-content:center;padding:20px;text-align:center}
  .overbox{max-width:480px;background:#fff;border-top:6px solid #d90429;border-radius:20px;padding:28px}
@@ -139,6 +146,10 @@ let live = cfg.live === '1', expires = null, winnerId = null, lastState = null, 
 let promoDraft = null, promoFocus = false;
 const lanes = document.getElementById('lanes');
 const over = document.getElementById('over');
+/* Customer presence: which seller lanes are on screen, and what the seller sees. */
+let presence = { viewing: new Set(), viewed: new Set() };
+let presenceSeenAt = 0, laneObserver = null, visiblePids = new Set();
+const PRESENCE_STALE_MS = 18000;
 
 function money(v){ return Number(v).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function showOver(msg){ document.getElementById('overmsg').textContent = msg; over.style.display = 'flex'; }
@@ -156,19 +167,100 @@ function savePromoItem(){
   send({action:'promo_item', text: el ? el.value : ''}); promoDraft = null; toast('Free item saved');
 }
 
+/* ---------------- Customer presence (seller sees who has seen the offer) ---------------- */
+function syncPresenceFromState(s){
+  const viewing = [], viewed = [];
+  s.participants.forEach(p => {
+    if (p.customer_viewing) viewing.push(p.id);
+    if (p.customer_viewed) viewed.push(p.id);
+  });
+  presence.viewing = new Set(viewing.map(Number));
+  presence.viewed = new Set(viewed.map(Number));
+  presenceSeenAt = Date.now();
+}
+
+function activeViewing(){
+  // Presence expires locally if the customer's heartbeats stop arriving.
+  return Date.now() - presenceSeenAt <= PRESENCE_STALE_MS ? presence.viewing : new Set();
+}
+
+function presenceLabel(pid){
+  if (activeViewing().has(pid)) return ['viewing', '👀 Customer is viewing now'];
+  if (presence.viewed.has(pid)) return ['viewed', '👁 Customer has seen this'];
+  return ['unseen', "⏳ Customer hasn't seen this yet"];
+}
+
+function presenceChip(pid){
+  const [state, text] = presenceLabel(pid);
+  return `<span class="chip presence-chip ${state}" id="presence-${pid}">${text}</span>`;
+}
+
+function applyPresence(){
+  document.querySelectorAll('.presence-chip').forEach(el => {
+    const pid = Number(el.id.replace('presence-', ''));
+    const [state, text] = presenceLabel(pid);
+    el.className = 'chip presence-chip ' + state;
+    el.textContent = text;
+  });
+}
+
+function sendPresence(){
+  if (!IS_OWNER) return;
+  const ids = document.visibilityState === 'hidden' ? [] : [...visiblePids];
+  send({action:'viewing', ids});
+}
+
+function observeLanes(){
+  if (!IS_OWNER) return;
+  if (laneObserver) { laneObserver.disconnect(); laneObserver = null; }
+  visiblePids = new Set();
+  const els = [...document.querySelectorAll('#lanes .lane[data-pid]')];
+  if (!els.length) { sendPresence(); return; }
+  if (!('IntersectionObserver' in window)) {
+    els.forEach(el => visiblePids.add(Number(el.dataset.pid)));
+    sendPresence();
+    return;
+  }
+  laneObserver = new IntersectionObserver(entries => {
+    entries.forEach(en => {
+      if (!document.contains(en.target)) return;
+      const pid = Number(en.target.dataset.pid);
+      if (en.isIntersecting) visiblePids.add(pid); else visiblePids.delete(pid);
+    });
+    sendPresence();
+  }, {threshold: 0.35});
+  els.forEach(el => laneObserver.observe(el));
+}
+
+if (IS_OWNER) {
+  document.addEventListener('visibilitychange', sendPresence);
+  setInterval(() => {
+    if (document.visibilityState !== 'hidden') sendPresence();
+  }, 5000);
+}
+setInterval(applyPresence, 3000);
+
 function render(s){
   lastState = s;
+  syncPresenceFromState(s);
   const r = s.race; expires = new Date(r.expires_at); winnerId = r.winner_id;
   document.getElementById('start').textContent = new Date(r.started_at).toLocaleTimeString();
   document.getElementById('slots').textContent = r.slots_left;
   lanes.innerHTML = s.participants.map(p => {
     const mine = p.seller_id === ME, hasDisc = p.discount > 0, won = p.id === winnerId;
     const canChat = IS_OWNER && (live || won);
-    return `<div class="card lane ${won ? 'won' : ''}">
+    const profileUrl = `/seller/${p.seller_id}/`;
+    const otherSeller = !mine;
+    const avatar = p.photo ? `<img class="avatar" src="${esc(p.photo)}">` : '<div class="avatar ph">' + esc(p.name).slice(0,1).toUpperCase() + '</div>';
+    const avatarHtml = otherSeller ? `<a class="seller-avatar-link" href="${profileUrl}" target="_blank" rel="noopener">${avatar}</a>` : avatar;
+    const nameHtml = otherSeller ? `<a class="seller-link" href="${profileUrl}" target="_blank" rel="noopener">${esc(p.name)}</a>` : esc(p.name);
+    return `<div class="card lane ${won ? 'won' : ''}" data-pid="${p.id}">
       <div class="lane-head">
-        ${p.photo ? `<img class="avatar" src="${esc(p.photo)}">` : '<div class="avatar ph">' + esc(p.name).slice(0,1).toUpperCase() + '</div>'}
-        <div><b>${esc(p.name)}</b><br><span class="muted">${esc(p.category || 'Seller')}</span>
+        ${avatarHtml}
+        <div><b>${nameHtml}</b><br><span class="muted">${esc(p.category || 'Seller')}</span>
           ${p.review_badges_html || ''}</div>
+        ${otherSeller ? `<a class="chip seller-profile" href="${profileUrl}" target="_blank" rel="noopener">👤 View profile</a>` : ''}
+        ${mine ? presenceChip(p.id) : ''}
         ${won ? '<span class="chip win">🏆 Winner</span>' : ''}
         ${!p.media_verified ? '<span class="tag unverified">Unverified media</span>' : ''}
       </div>
@@ -214,6 +306,7 @@ function render(s){
       </div>` : ''}
     </div>`;
   }).join('') || '<p class="muted">No sellers in the race yet. Waiting for sellers…</p>';
+  observeLanes();
   if (promoFocus) {
     const i = document.getElementById('promoItem');
     if (i) { i.focus(); const n = i.value.length; i.setSelectionRange(n, n); }
@@ -225,6 +318,12 @@ function connect(){
   ws.onmessage = e => {
     const d = JSON.parse(e.data);
     if (d.type === 'state') render(d.state);
+    else if (d.type === 'presence') {
+      presence.viewing = new Set((d.viewing || []).map(Number));
+      presence.viewed = new Set((d.viewed || []).map(Number));
+      presenceSeenAt = Date.now();
+      applyPresence();
+    }
     else if (d.type === 'event') { toast(d.message); beep(); notify('The Rat Race', d.message, location.href); }
     else if (d.type === 'quality_state' || d.type === 'quality_request') {
       updateQualityButton(d);

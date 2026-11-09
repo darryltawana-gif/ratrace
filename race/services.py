@@ -21,6 +21,9 @@ from .models import (Race, Participant, Profile, ChatRoom, ChatMessage,
 log = logging.getLogger(__name__)
 MAX_DISCOUNT = 50
 QUALITY_SECONDS = getattr(settings, "QUALITY_SECONDS", 48 * 60)
+# A customer heartbeat is considered live for this many seconds. Short enough
+# that a closed tab stops showing as "viewing now" even without a clean close.
+PRESENCE_TTL = getattr(settings, "PRESENCE_TTL", 15)
 
 
 def ice_servers():
@@ -169,6 +172,9 @@ def participant_dict(p, review_badges=None):
     photo = getattr(getattr(p.seller, "profile", None), "photo", None)
     category = getattr(getattr(p.seller, "profile", None), "category_label", "")
     badges = review_badges or []
+    now = timezone.now()
+    viewing = bool(p.customer_viewing_at and
+                  now - p.customer_viewing_at <= timedelta(seconds=PRESENCE_TTL))
     return {"id": p.id, "slot": p.slot, "seller_id": p.seller_id, "name": p.display_name,
             "product": p.product_name, "price": str(p.price), "final_price": str(p.final_price),
             "details": p.details, "image": p.image.url, "video": p.video.url if p.video else "",
@@ -178,8 +184,71 @@ def participant_dict(p, review_badges=None):
             "review_badges_html": render_to_string(
                 "includes/review_badges.html",
                 {"badges": badges, "compact": True, "limit": 2}),
+            "customer_viewed": bool(p.customer_viewed_at),
+            "customer_viewing": viewing,
+            "customer_viewed_at": p.customer_viewed_at.isoformat() if p.customer_viewed_at else "",
+            "customer_viewing_at": p.customer_viewing_at.isoformat() if p.customer_viewing_at else "",
             "discount": p.discount, "delivery": p.delivery, "promo": p.promo,
             "promo_item": p.promo_item, "progress": p.progress}
+
+
+def update_customer_presence(user, race_id, participant_ids):
+    """Record which seller offers the customer currently has on screen.
+
+    Only the customer who owns the race may report presence. The first time a
+    lane is seen we stamp ``customer_viewed_at``; every heartbeat refreshes
+    ``customer_viewing_at``. Lanes the customer has scrolled away from lose
+    their live stamp immediately, while the short TTL is a safety net for a
+    tab that disappears without a clean disconnect.
+    """
+    race = Race.objects.filter(pk=race_id, customer=user).first()
+    if not race:
+        return False
+    ids = set()
+    for raw in participant_ids or []:
+        try:
+            ids.add(int(raw))
+        except (TypeError, ValueError):
+            continue
+    now = timezone.now()
+    for p in race.participants.filter(active=True):
+        if p.id in ids:
+            update = ["customer_viewing_at"]
+            p.customer_viewing_at = now
+            if not p.customer_viewed_at:
+                p.customer_viewed_at = now
+                update.append("customer_viewed_at")
+            p.save(update_fields=update)
+        elif p.customer_viewing_at:
+            p.customer_viewing_at = None
+            p.save(update_fields=["customer_viewing_at"])
+    return True
+
+
+def clear_customer_presence(user, race_id):
+    """Stop showing the customer as viewing when their race socket closes."""
+    race = Race.objects.filter(pk=race_id, customer=user).first()
+    if not race:
+        return False
+    updated = race.participants.filter(
+        active=True, customer_viewing_at__isnull=False).update(customer_viewing_at=None)
+    return bool(updated)
+
+
+def presence_payload(race_id):
+    """Lightweight presence update for the race socket.
+
+    Sending only the IDs keeps heartbeats from re-rendering every seller lane.
+    """
+    now = timezone.now()
+    ttl = timedelta(seconds=PRESENCE_TTL)
+    viewing, viewed = [], []
+    for p in Participant.objects.filter(race_id=race_id, active=True):
+        if p.customer_viewing_at and now - p.customer_viewing_at <= ttl:
+            viewing.append(p.id)
+        if p.customer_viewed_at:
+            viewed.append(p.id)
+    return {"type": "presence", "viewing": viewing, "viewed": viewed}
 
 
 def race_state(race_id):

@@ -1,13 +1,16 @@
 from datetime import timedelta
 from io import BytesIO
 
+from asgiref.sync import async_to_sync
+from channels.testing import WebsocketCommunicator
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from PIL import Image
 
 from . import services as sv
+from .consumers import RaceConsumer
 from .models import (AccountGroup, AccountIdentity, ChatRoom, Circle, CircleMember,
                      CircleMessage, Participant, Post, Profile, QualitySession,
                      Race, Report, Review)
@@ -232,6 +235,113 @@ class ReviewDisplayTests(TestCase):
         self.assertContains(response, "Good Quality")
         response = self.client.get(f"/chat/{room.id}/")
         self.assertContains(response, "Good Quality")
+
+
+class PresenceTests(TestCase):
+    """Sellers can tell whether the customer saw or is viewing their offer."""
+
+    def setUp(self):
+        self.customer = make_user("presencebuyer", "customer")
+        self.seller = make_user("presenceseller", "seller")
+        self.other = make_user("otherpresence", "seller")
+        self.race = Race.objects.create(customer=self.customer, product="Phone", budget=100)
+        self.mine = Participant.objects.create(
+            race=self.race, seller=self.seller, slot=1, display_name="Presence Seller",
+            product_name="Phone", price=90, details="", image="products/x.jpg")
+        self.theirs = Participant.objects.create(
+            race=self.race, seller=self.other, slot=2, display_name="Other Seller",
+            product_name="Phone", price=95, details="", image="products/y.jpg")
+
+    def test_customer_presence_marks_viewed_and_viewing(self):
+        self.assertTrue(sv.update_customer_presence(
+            self.customer, self.race.id, [self.mine.id]))
+        self.mine.refresh_from_db()
+        self.assertIsNotNone(self.mine.customer_viewed_at)
+        self.assertIsNotNone(self.mine.customer_viewing_at)
+
+        payload = sv.presence_payload(self.race.id)
+        self.assertIn(self.mine.id, payload["viewing"])
+        self.assertIn(self.mine.id, payload["viewed"])
+        self.assertNotIn(self.theirs.id, payload["viewing"])
+
+        state = sv.race_state(self.race.id)
+        row = next(x for x in state["participants"] if x["id"] == self.mine.id)
+        self.assertTrue(row["customer_viewed"])
+        self.assertTrue(row["customer_viewing"])
+
+    def test_scrolling_away_clears_viewing_but_keeps_viewed(self):
+        sv.update_customer_presence(self.customer, self.race.id, [self.mine.id])
+        sv.update_customer_presence(self.customer, self.race.id, [])
+        self.mine.refresh_from_db()
+        self.assertIsNone(self.mine.customer_viewing_at)
+        self.assertIsNotNone(self.mine.customer_viewed_at)
+        payload = sv.presence_payload(self.race.id)
+        self.assertNotIn(self.mine.id, payload["viewing"])
+        self.assertIn(self.mine.id, payload["viewed"])
+
+    def test_viewing_expires_after_ttl(self):
+        sv.update_customer_presence(self.customer, self.race.id, [self.mine.id])
+        Participant.objects.filter(pk=self.mine.pk).update(
+            customer_viewing_at=timezone.now() - timedelta(seconds=sv.PRESENCE_TTL + 1))
+        payload = sv.presence_payload(self.race.id)
+        self.assertNotIn(self.mine.id, payload["viewing"])
+        self.assertIn(self.mine.id, payload["viewed"])
+
+    def test_only_the_race_customer_can_report_presence(self):
+        self.assertFalse(sv.update_customer_presence(
+            self.seller, self.race.id, [self.mine.id]))
+        self.mine.refresh_from_db()
+        self.assertIsNone(self.mine.customer_viewing_at)
+
+    def test_disconnect_clears_viewing(self):
+        sv.update_customer_presence(self.customer, self.race.id, [self.mine.id])
+        self.assertTrue(sv.clear_customer_presence(self.customer, self.race.id))
+        self.mine.refresh_from_db()
+        self.assertIsNone(self.mine.customer_viewing_at)
+        self.assertIsNotNone(self.mine.customer_viewed_at)
+
+    def test_other_seller_profile_is_reachable(self):
+        self.client.force_login(self.seller)
+        response = self.client.get(f"/seller/{self.other.id}/")
+        self.assertEqual(response.status_code, 200)
+
+
+class PresenceSocketTests(TransactionTestCase):
+    """The customer's race socket records presence and broadcasts it."""
+
+    def setUp(self):
+        self.customer = make_user("socketbuyer", "customer")
+        self.seller = make_user("socketseller", "seller")
+        self.race = Race.objects.create(
+            customer=self.customer, product="Phone", budget=100,
+            expires_at=timezone.now() + timedelta(minutes=20))
+        self.mine = Participant.objects.create(
+            race=self.race, seller=self.seller, slot=1, display_name="Socket Seller",
+            product_name="Phone", price=90, details="", image="products/x.jpg")
+
+    def test_viewing_action_updates_presence_and_broadcasts(self):
+        async def scenario():
+            comm = WebsocketCommunicator(
+                RaceConsumer.as_asgi(), f"/ws/race/{self.race.id}/")
+            comm.scope["user"] = self.customer
+            comm.scope["url_route"] = {"kwargs": {"race_id": str(self.race.id)}}
+            connected, _ = await comm.connect()
+            self.assertTrue(connected)
+            state_msg = await comm.receive_json_from()
+            quality_msg = await comm.receive_json_from()
+            self.assertEqual(state_msg["type"], "state")
+            self.assertEqual(quality_msg["type"], "quality_state")
+            await comm.send_json_to({"action": "viewing", "ids": [self.mine.id]})
+            presence_msg = await comm.receive_json_from()
+            self.assertEqual(presence_msg["type"], "presence")
+            self.assertIn(self.mine.id, presence_msg["viewing"])
+            self.assertIn(self.mine.id, presence_msg["viewed"])
+            await comm.disconnect()
+
+        async_to_sync(scenario)()
+        self.mine.refresh_from_db()
+        self.assertIsNotNone(self.mine.customer_viewed_at)
+        self.assertIsNone(self.mine.customer_viewing_at)
 
 
 class PrivacyTests(TestCase):

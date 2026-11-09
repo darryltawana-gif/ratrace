@@ -244,6 +244,11 @@ class Participant(models.Model):
     promo = models.PositiveSmallIntegerField(default=0)      # buy 1 get N free, max 3
     promo_item = models.CharField(max_length=120, blank=True, default="")
     active = models.BooleanField(default=True)
+    # Customer presence for this offer. ``customer_viewed_at`` is the first
+    # time the customer saw the lane; ``customer_viewing_at`` is the latest
+    # heartbeat and expires after a short TTL.
+    customer_viewed_at = models.DateTimeField(blank=True, null=True)
+    customer_viewing_at = models.DateTimeField(blank=True, null=True)
     joined_at = models.DateTimeField(auto_now_add=True)
 
     @property

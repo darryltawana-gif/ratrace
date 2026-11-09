@@ -51,7 +51,17 @@ class RaceConsumer(Base):
     async def disconnect(self, code):
         if hasattr(self, "timer"):
             self.timer.cancel()
-        await self.channel_layer.group_discard(self.group, self.channel_name)
+        group = getattr(self, "group", None)
+        user = self.scope.get("user")
+        if group and user and getattr(user, "is_authenticated", False):
+            cleared = await database_sync_to_async(services.clear_customer_presence)(
+                user, self.race_id)
+            if cleared:
+                payload = await database_sync_to_async(services.presence_payload)(self.race_id)
+                await self.channel_layer.group_send(
+                    group, {"type": "relay", "payload": payload})
+        if group:
+            await self.channel_layer.group_discard(group, self.channel_name)
 
     async def expiry(self):
         wait = await database_sync_to_async(services.seconds_left)(self.race_id)
@@ -74,6 +84,20 @@ class RaceConsumer(Base):
         elif action == "promo_item":
             ok = await database_sync_to_async(services.set_promo_item)(
                 user, self.race_id, str(content.get("text", "")))
+        elif action == "viewing":
+            # Customer reports which seller lanes are on screen right now.
+            # Broadcast only the lightweight presence lists, never a full
+            # state, so heartbeats do not rebuild every lane.
+            ids = content.get("ids")
+            if not isinstance(ids, list):
+                ids = []
+            reported = await database_sync_to_async(services.update_customer_presence)(
+                user, self.race_id, ids)
+            if reported:
+                payload = await database_sync_to_async(services.presence_payload)(self.race_id)
+                await self.channel_layer.group_send(
+                    self.group, {"type": "relay", "payload": payload})
+            return
         elif action == "quality_request":
             # Seller asks the customer to watch a live Quality Proof video.
             # The server owns the clock and allows one 48-minute window per
