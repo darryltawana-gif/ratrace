@@ -27,13 +27,25 @@
  button,input,textarea,select{font:inherit;color:inherit}
  .muted{color:#5a6a8c}
 
- nav{position:-webkit-sticky;position:sticky;top:0;z-index:50;display:flex;flex-wrap:wrap;align-items:center;gap:10px;
-     padding:10px 18px;background-color:#0b1f4b;border-bottom:4px solid #d90429}
- nav .brand{font-weight:800;font-size:1.3rem;color:#ffffff;text-decoration:none;margin-right:auto}
- nav a:not(.brand):not(.btn){color:#ffffff;text-decoration:none;font-weight:600}
- nav a:not(.brand):not(.btn):hover{text-decoration:underline}
- nav form{margin:0}
+ nav{position:-webkit-sticky;position:sticky;top:0;z-index:50;background-color:#0b1f4b;
+     border-bottom:4px solid #d90429;padding:0 14px}
+ .nav-inner{max-width:1012px;margin:0 auto;display:flex;flex-wrap:wrap;align-items:center;
+     gap:9px 10px;padding:9px 0}
+ nav .brand{display:inline-flex;align-items:center;font-weight:800;font-size:1.25rem;color:#ffffff;
+     text-decoration:none;line-height:1.15;white-space:nowrap}
+ .nav-links,.nav-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0}
+ .nav-links{flex:1 1 auto}
+ .nav-actions{margin-left:auto;justify-content:flex-end}
+ nav .nav-link{display:inline-flex;align-items:center;gap:5px;min-height:34px;padding:7px 12px;
+     border-radius:999px;background-color:#16336f;border:1px solid #2c4c8f;color:#ffffff;
+     text-decoration:none;font-weight:700;font-size:.9rem;line-height:1.2;white-space:nowrap}
+ nav .nav-link:hover{background-color:#20448d;text-decoration:none}
+ nav a:not(.brand):not(.btn):not(.nav-link){color:#ffffff;text-decoration:none;font-weight:600}
+ nav a:not(.brand):not(.btn):not(.nav-link):hover{text-decoration:underline}
+ nav form{margin:0;display:inline-flex}
  nav .chip{background-color:#16336f;border-color:#3a5aa6;color:#ffffff}
+ .nav-actions .chip{display:inline-flex;align-items:center;min-height:34px;padding:5px 11px}
+ nav .btn.small{min-height:34px;padding:6px 14px;font-size:.9rem}
  nav .btn.navy{background-color:#ffffff;color:#0b1f4b;box-shadow:none}
  nav .btn.ghost{background-color:transparent;border:1.5px solid #6f8cc9;color:#ffffff;box-shadow:none}
  main{max-width:1040px;margin:0 auto;padding:20px 14px 80px}
@@ -104,12 +116,16 @@
  #notifbar{background-color:#fff0f2;color:#0b1f4b;padding:10px 16px;display:none;border-bottom:1px solid #f3b4c0;font-weight:500}
  #notifbar .btn{margin-left:8px}
  @media (max-width:560px){
-   /* One swipeable row keeps the header small on phones instead of a tall stack. */
-   nav{flex-wrap:nowrap;overflow-x:auto;gap:8px;padding:8px 10px;scrollbar-width:none;
-       -webkit-overflow-scrolling:touch}
-   nav::-webkit-scrollbar{display:none}
-   nav>*{flex:0 0 auto}
-   nav .brand{font-size:1.05rem}
+   /* Every button stays visible: the groups wrap instead of scrolling sideways.
+      On phones the header scrolls with the page so it does not cover content. */
+   nav{position:static;padding:0 10px}
+   .nav-inner{gap:7px;padding:8px 0}
+   nav .brand{font-size:1.1rem;width:100%}
+   .nav-links,.nav-actions{width:100%;margin-left:0;justify-content:flex-start;gap:6px}
+   nav .nav-link{font-size:.83rem;padding:6px 10px;min-height:32px}
+   nav .btn.small{min-height:32px;padding:6px 11px;font-size:.83rem}
+   nav .chip{font-size:.76rem;padding:3px 9px}
+   .nav-actions .chip{min-height:32px}
    .btn{padding:10px 15px}
    #notifbar{padding:8px 12px;font-size:.88rem;line-height:1.35}
    #notifbar .btn{margin-left:6px;padding:7px 11px;font-size:.82rem}
@@ -190,26 +206,33 @@
 </head>
 <body>
 <nav>
-  <a class="brand" href="/"><svg width="22" height="22" viewBox="0 0 24 24" style="vertical-align:-4px;margin-right:4px" aria-hidden="true"><defs><linearGradient id="crownG" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffe27a"/><stop offset=".55" stop-color="#f5c518"/><stop offset="1" stop-color="#c08a00"/></linearGradient></defs><path d="M3 18h18l-1.4-9.2-4.6 3.1L12 5l-3 6.9-4.6-3.1z" fill="url(#crownG)" stroke="#b8860b" stroke-width="1" stroke-linejoin="round"/><circle cx="3" cy="8" r="1.5" fill="#ffe27a"/><circle cx="21" cy="8" r="1.5" fill="#ffe27a"/><circle cx="12" cy="4" r="1.6" fill="#fff3b0"/></svg>The Rat Race</a>
-  {% if user.is_authenticated %}<a href="{% url 'my_circle' %}">🤝 My Circle{% if circle_pending %} <span class="chip win">{{ circle_pending }}</span>{% endif %}</a>{% endif %}
-  {% if role == 'seller' %}<a href="{% url 'my_posts' %}">🛍 My Posts</a>{% endif %}
-  <a href="{% url 'comments' %}">Comments</a>
-  <a href="{% url 'scamdoctor:checker' %}">🕵️ Scam Doctor</a>
-  {% if user.is_authenticated %}
-    <a href="{% url 'chat_list' %}">💬 Chats</a>
-    {% if role == 'none' %}
-      <form method="post" action="{% url 'set_role' 'seller' %}">{% csrf_token %}<button class="btn small">I'm a Seller</button></form>
-      <form method="post" action="{% url 'set_role' 'customer' %}">{% csrf_token %}<button class="btn small navy">I'm a Customer</button></form>
-    {% else %}
-      {% if role == 'seller' %}<a href="{% url 'profile' %}">📷 My photo</a>{% endif %}
-      <form method="post" action="{% url 'set_role' 'none' %}">{% csrf_token %}<button class="btn small ghost">Cancel {{ role }} mode</button></form>
-    {% endif %}
-    <span class="chip">👤 {{ user.username }}</span>
-    <a href="{% url 'signup' %}">➕ Add account</a>
-    <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn small ghost">Logout</button></form>
-  {% else %}
-    <a href="{% url 'login' %}">Login</a> <a class="btn small" href="{% url 'signup' %}">Sign up</a>
-  {% endif %}
+  <div class="nav-inner">
+    <a class="brand" href="/"><svg width="22" height="22" viewBox="0 0 24 24" style="vertical-align:-4px;margin-right:4px" aria-hidden="true"><defs><linearGradient id="crownG" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffe27a"/><stop offset=".55" stop-color="#f5c518"/><stop offset="1" stop-color="#c08a00"/></linearGradient></defs><path d="M3 18h18l-1.4-9.2-4.6 3.1L12 5l-3 6.9-4.6-3.1z" fill="url(#crownG)" stroke="#b8860b" stroke-width="1" stroke-linejoin="round"/><circle cx="3" cy="8" r="1.5" fill="#ffe27a"/><circle cx="21" cy="8" r="1.5" fill="#ffe27a"/><circle cx="12" cy="4" r="1.6" fill="#fff3b0"/></svg>The Rat Race</a>
+    <div class="nav-links">
+      {% if user.is_authenticated %}<a class="nav-link" href="{% url 'my_circle' %}">🤝 My Circle{% if circle_pending %} <span class="chip win">{{ circle_pending }}</span>{% endif %}</a>{% endif %}
+      {% if role == 'seller' %}<a class="nav-link" href="{% url 'my_posts' %}">🛍 My Posts</a>{% endif %}
+      <a class="nav-link" href="{% url 'comments' %}">Comments</a>
+      <a class="nav-link" href="{% url 'scamdoctor:checker' %}">🕵️ Scam Doctor</a>
+      {% if user.is_authenticated %}<a class="nav-link" href="{% url 'chat_list' %}">💬 Chats</a>{% endif %}
+      {% if user.is_authenticated and role == 'seller' %}<a class="nav-link" href="{% url 'profile' %}">📷 My photo</a>{% endif %}
+    </div>
+    <div class="nav-actions">
+      {% if user.is_authenticated %}
+        {% if role == 'none' %}
+          <form method="post" action="{% url 'set_role' 'seller' %}">{% csrf_token %}<button class="btn small">I'm a Seller</button></form>
+          <form method="post" action="{% url 'set_role' 'customer' %}">{% csrf_token %}<button class="btn small navy">I'm a Customer</button></form>
+        {% else %}
+          <form method="post" action="{% url 'set_role' 'none' %}">{% csrf_token %}<button class="btn small ghost">Cancel {{ role }} mode</button></form>
+        {% endif %}
+        <span class="chip">👤 {{ user.username }}</span>
+        <a class="nav-link" href="{% url 'signup' %}">➕ Add account</a>
+        <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn small ghost">Logout</button></form>
+      {% else %}
+        <a class="nav-link" href="{% url 'login' %}">Login</a>
+        <a class="btn small" href="{% url 'signup' %}">Sign up</a>
+      {% endif %}
+    </div>
+  </div>
 </nav>
 <div id="notifbar"><span id="notiftxt"></span><button type="button" class="btn small" id="notifbtn">🔔 Turn on alerts</button></div>
 <div id="toasts"><button type="button" id="clearall">Clear all</button></div>

@@ -335,15 +335,23 @@ def reaction_map_for(message_ids):
 def circle_message_dict(m, reactions=None):
     if reactions is None:
         reactions = reactions_for(m.id)
+    reply_to = None
+    if m.reply_to_id:
+        original = m.reply_to
+        reply_to = {"id": original.id,
+                    "sender": original.sender.username if original.sender else "System",
+                    "text": original.text[:140]}
     return {"id": m.id, "sender_id": m.sender_id,
             "sender": m.sender.username if m.sender else "System",
             "topic": m.topic, "topic_label": dict(CIRCLE_TOPICS).get(m.topic, "Any other talks"),
             "text": m.text, "created": m.created.isoformat(),
-            "reactions": reactions}
+            "reply_to": reply_to, "reactions": reactions}
 
 
 def circle_history(circle_id, limit=200):
-    qs = CircleMessage.objects.filter(circle_id=circle_id).order_by("-created", "-id")[:limit]
+    qs = (CircleMessage.objects.filter(circle_id=circle_id)
+          .select_related("sender", "reply_to__sender")
+          .order_by("-created", "-id")[:limit])
     messages = list(reversed(list(qs)))
     reaction_map = reaction_map_for([m.id for m in messages])
     return [circle_message_dict(m, reaction_map.get(m.id, [])) for m in messages]
@@ -382,7 +390,7 @@ def set_circle_topic(user, circle_id, topic):
             "by": user.username}
 
 
-def save_circle_message(user, circle_id, text, topic=""):
+def save_circle_message(user, circle_id, text, topic="", reply_to_id=None):
     circle = Circle.objects.filter(pk=circle_id).first()
     if not circle or not is_circle_member(circle, user):
         return None
@@ -394,7 +402,12 @@ def save_circle_message(user, circle_id, text, topic=""):
             circle.save(update_fields=["current_topic"])
             changed = topic
     used_topic = circle.current_topic if circle.current_topic in CIRCLE_TOPIC_KEYS else "other"
-    m = CircleMessage.objects.create(circle=circle, sender=user, text=text[:1000], topic=used_topic)
+    # Only a message from this same Circle can be quoted as a reply.
+    reply_to = None
+    if reply_to_id:
+        reply_to = CircleMessage.objects.filter(pk=reply_to_id, circle=circle).first()
+    m = CircleMessage.objects.create(circle=circle, sender=user, text=text[:1000],
+                                     topic=used_topic, reply_to=reply_to)
     return {"message": circle_message_dict(m, []), "topic_changed": changed}
 
 

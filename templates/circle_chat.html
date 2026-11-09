@@ -37,6 +37,18 @@
  .composer{display:flex;gap:8px;padding:10px;border-top:1px solid var(--border);background:#fff;align-items:flex-end;flex-wrap:wrap}
  .composer textarea{flex:1;min-width:160px;resize:none;max-height:120px;min-height:44px;line-height:1.4}
  .composer select{max-width:190px}
+ .quote{border-left:3px solid #d90429;background:rgba(11,31,75,.06);border-radius:8px;padding:5px 9px;margin-bottom:5px;font-size:.8rem;white-space:normal}
+ .quote b{display:block;font-size:.72rem;font-weight:800;margin-bottom:1px}
+ .quote span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85}
+ .bub.me .quote{background:rgba(255,255,255,.14);border-left-color:#ff9aad}
+ .reply-add{font-size:.78rem}
+ .replybar{display:none;gap:8px;align-items:center;padding:8px 12px;background:#f7f9fe;border-top:1px solid var(--border)}
+ .replybar.show{display:flex}
+ .replybar .rq{flex:1;min-width:0;border-left:3px solid #d90429;background:#eef3ff;border-radius:8px;padding:5px 9px;font-size:.84rem}
+ .replybar .rq b{display:block;color:#0b1f4b;font-size:.76rem}
+ .replybar .rq span{display:block;color:#5a6a8c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .replybar .rx{background:transparent;border:1.5px solid #c5d0ea;color:#5a6a8c;border-radius:999px;width:32px;height:32px;flex:none;font-size:1.2rem;line-height:1;cursor:pointer}
+ .replybar .rx:hover{background:#fff0f2;border-color:#f3b4c0;color:#b30322}
  @media (max-width:560px){.composer select{max-width:100%;order:-1;width:100%}}
 </style>
 
@@ -75,6 +87,11 @@
 
   <div id="msgs" class="msgs"></div>
 
+  <div id="replybar" class="replybar" aria-live="polite">
+    <div class="rq"><b id="replywho"></b><span id="replytext"></span></div>
+    <button type="button" class="rx" id="replycancel" aria-label="Cancel reply" title="Cancel reply">×</button>
+  </div>
+
   <div class="composer">
     {% if is_owner %}
     <select id="topic" title="Topic">
@@ -96,8 +113,11 @@ const IS_OWNER = cfg.owner === '1';
 const list = document.getElementById('msgs'), box = document.getElementById('box');
 const sendBtn = document.getElementById('send'), statusEl = document.getElementById('status');
 const topicEl = document.getElementById('topic');
+const replyBar = document.getElementById('replybar'), replyWho = document.getElementById('replywho');
+const replyText = document.getElementById('replytext'), replyCancel = document.getElementById('replycancel');
 let ws = null, seen = new Set(), lastDay = '';
 let currentTopic = cfg.topic || 'other';
+let replyTo = null;
 const REACTIONS = JSON.parse(document.getElementById('reaction-options').textContent);
 
 function atBottom(){ return list.scrollHeight - list.scrollTop - list.clientHeight < 90; }
@@ -128,7 +148,14 @@ function addMsg(m, stick){
   el.className = 'bub ' + (m.sender_id === ME ? 'me' : 'them');
   el.dataset.mid = m.id;
   el.dataset.text = m.text;
+  el.dataset.sender = m.sender;
   if (m.sender_id !== ME){ const n = document.createElement('div'); n.className = 'nm'; n.textContent = m.sender; el.appendChild(n); }
+  if (m.reply_to){
+    const q = document.createElement('div'); q.className = 'quote';
+    const qn = document.createElement('b'); qn.textContent = '↩ ' + (m.reply_to.sender || 'Message');
+    const qt = document.createElement('span'); qt.textContent = m.reply_to.text || '';
+    q.appendChild(qn); q.appendChild(qt); el.appendChild(q);
+  }
   const t = document.createElement('div'); t.textContent = m.text; el.appendChild(t);
   const tp = document.createElement('div'); tp.className = 'tp'; tp.textContent = '#' + (m.topic_label || 'Any other talks'); el.appendChild(tp);
   const rb = document.createElement('div'); rb.className = 'reactbar'; el.appendChild(rb);
@@ -142,6 +169,22 @@ function addMsg(m, stick){
 function reactTo(messageId, emoji){
   if (!ws || ws.readyState !== 1) return;
   ws.send(JSON.stringify({action:'react', message_id: Number(messageId), emoji}));
+}
+function startReply(bubble){
+  if (!bubble) return;
+  replyTo = {id: Number(bubble.dataset.mid), sender: bubble.dataset.sender || 'Message',
+             text: bubble.dataset.text || ''};
+  replyWho.textContent = 'Replying to ' + replyTo.sender;
+  replyText.textContent = replyTo.text;
+  replyBar.classList.add('show');
+  document.querySelectorAll('.picker.show').forEach(p => p.classList.remove('show'));
+  box.focus();
+}
+function clearReply(){
+  replyTo = null;
+  replyBar.classList.remove('show');
+  replyWho.textContent = '';
+  replyText.textContent = '';
 }
 function togglePicker(bubble){
   const picker = bubble.querySelector('.picker');
@@ -174,6 +217,14 @@ function renderReactions(bubble, reactions){
   add.setAttribute('aria-label', 'React with an emoji');
   add.onclick = () => togglePicker(bubble);
   bar.appendChild(add);
+  const rep = document.createElement('button');
+  rep.type = 'button';
+  rep.className = 'react-add reply-add';
+  rep.textContent = '↩ Reply';
+  rep.title = 'Reply to this message';
+  rep.setAttribute('aria-label', 'Reply to this message');
+  rep.onclick = () => startReply(bubble);
+  bar.appendChild(rep);
   const picker = document.createElement('div');
   picker.className = 'picker';
   REACTIONS.forEach(emoji => {
@@ -212,14 +263,19 @@ function sendMsg(){
   const t = box.value.trim();
   if (!t || !ws || ws.readyState !== 1) return;
   const payload = {text: t};
+  if (replyTo) payload.reply_to = replyTo.id;
   if (IS_OWNER && topicEl) payload.topic = topicEl.value;
   ws.send(JSON.stringify(payload));
-  box.value = ''; grow(); box.focus();
+  box.value = ''; clearReply(); grow(); box.focus();
 }
 function grow(){ box.style.height = 'auto'; box.style.height = Math.min(box.scrollHeight, 120) + 'px'; }
 sendBtn.onclick = sendMsg;
+replyCancel.onclick = clearReply;
 box.addEventListener('input', grow);
-box.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); sendMsg(); } });
+box.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); sendMsg(); }
+  else if (e.key === 'Escape' && replyTo){ clearReply(); }
+});
 document.querySelectorAll('.tbtn').forEach(b => b.onclick = () => {
   if (!IS_OWNER || !ws || ws.readyState !== 1) return;
   ws.send(JSON.stringify({action:'topic', topic:b.dataset.topic}));

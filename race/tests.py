@@ -55,6 +55,32 @@ class HomePageTests(TestCase):
         self.assertLess(body.index(">🕒 Recent activities</h2>"), body.index(">🤝 My Circle</h3>"))
 
 
+class NavigationTests(TestCase):
+    def test_guest_nav_lists_public_links(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode()
+        self.assertIn('class="nav-links"', body)
+        self.assertIn('class="nav-actions"', body)
+        for label in ["Comments", "Scam Doctor", "Login", "Sign up"]:
+            self.assertIn(label, body)
+
+    def test_seller_nav_lists_every_link_without_sideways_scroll(self):
+        seller = make_user("navseller", "seller")
+        self.client.force_login(seller)
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode()
+        self.assertIn('class="nav-links"', body)
+        self.assertIn('class="nav-actions"', body)
+        for label in ["My Circle", "My Posts", "Comments", "Scam Doctor", "Chats",
+                      "My photo", "Add account", "Logout"]:
+            self.assertIn(label, body)
+        # The header must wrap, not hide buttons behind a sideways swipe.
+        self.assertNotIn("nav{flex-wrap:nowrap", body)
+        self.assertNotIn("nav>*{flex:0 0 auto}", body)
+
+
 class AccountGroupTests(TestCase):
     def test_same_email_links_two_accounts(self):
         first = make_user("first", "customer", email="same@example.com")
@@ -296,6 +322,29 @@ class CircleTests(TestCase):
         sv.react_to_circle_message(self.seller, self.circle.id, msg.id, "🙏")
         history = sv.circle_history(self.circle.id)
         self.assertEqual(history[-1]["reactions"][0]["emoji"], "🙏")
+
+    def test_reply_quotes_the_original_message(self):
+        original = sv.save_circle_message(
+            self.customer, self.circle.id, "Which bag is best?")["message"]
+        reply = sv.save_circle_message(
+            self.seller, self.circle.id, "The leather one.",
+            reply_to_id=original["id"])["message"]
+        self.assertEqual(reply["reply_to"]["id"], original["id"])
+        self.assertEqual(reply["reply_to"]["sender"], "circlebuyer")
+        self.assertEqual(reply["reply_to"]["text"], "Which bag is best?")
+        history = sv.circle_history(self.circle.id)
+        self.assertEqual(history[-1]["reply_to"]["id"], original["id"])
+        self.assertIsNone(history[0]["reply_to"])
+
+    def test_reply_to_message_from_another_circle_is_ignored(self):
+        other_circle = sv.ensure_circle(self.other)
+        other_msg = CircleMessage.objects.create(
+            circle=other_circle, sender=self.other, text="Not yours", topic="other")
+        reply = sv.save_circle_message(
+            self.seller, self.circle.id, "Sneaky quote",
+            reply_to_id=other_msg.id)["message"]
+        self.assertIsNone(reply["reply_to"])
+        self.assertIsNone(CircleMessage.objects.get(pk=reply["id"]).reply_to_id)
 
 
 class PostTests(TestCase):

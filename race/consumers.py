@@ -228,10 +228,14 @@ class CircleConsumer(Base):
             return
         text = str(content.get("text", "")).strip()[:1000]
         topic = str(content.get("topic", ""))
+        try:
+            reply_to_id = int(content.get("reply_to")) if content.get("reply_to") else None
+        except (TypeError, ValueError):
+            reply_to_id = None
         if not text:
             return
         res = await database_sync_to_async(services.save_circle_message)(
-            self.user, self.circle_id, text, topic)
+            self.user, self.circle_id, text, topic, reply_to_id)
         if not res:
             return
         await self.channel_layer.group_send(

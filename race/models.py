@@ -319,6 +319,8 @@ class CircleMessage(models.Model):
                                on_delete=models.SET_NULL, related_name="circle_messages")
     topic = models.CharField(max_length=20, choices=CIRCLE_TOPICS, default="other")
     text = models.TextField()
+    reply_to = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL,
+                                 related_name="replies")
     created = models.DateTimeField(default=timezone.now)
 
     class Meta:
