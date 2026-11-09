@@ -205,9 +205,11 @@ def race_room(request, race_id):
                     messages.error(request, "Race is full (10 sellers).")
                     return redirect("race_room", race.id)
                 if needs_photo:
-                    prof = sv.get_profile(request.user)
-                    prof.photo = form.cleaned_data["profile_photo"]
-                    prof.save(update_fields=["photo"])
+                    photo = form.cleaned_data.get("profile_photo")
+                    if photo:
+                        prof = sv.get_profile(request.user)
+                        prof.photo = photo
+                        prof.save(update_fields=["photo"])
                 p = form.save(commit=False)
                 p.race, p.seller, p.slot = locked, request.user, slot
                 p.display_name = request.user.username

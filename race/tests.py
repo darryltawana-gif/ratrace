@@ -1,9 +1,11 @@
 from datetime import timedelta
+from io import BytesIO
 
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from PIL import Image
 
 from . import services as sv
 from .models import (AccountGroup, AccountIdentity, Circle, CircleMember,
@@ -19,6 +21,12 @@ def make_user(username, role="customer", email="", phone=""):
     profile.phone = phone
     profile.save()
     return user
+
+
+def jpeg_upload(name="photo.jpg"):
+    buf = BytesIO()
+    Image.new("RGB", (8, 8), "red").save(buf, "JPEG")
+    return SimpleUploadedFile(name, buf.getvalue(), content_type="image/jpeg")
 
 
 class HomePageTests(TestCase):
@@ -200,6 +208,45 @@ class PrivacyTests(TestCase):
         with override_settings(MEDIA_ROOT=report.screenshot.storage.location):
             response = self.client.get(f"/reports/{report.id}/screenshot/")
         self.assertEqual(response.status_code, 200)
+
+
+class JoinRaceTests(TestCase):
+    """A seller must enter the race immediately without a profile-photo detour."""
+
+    def setUp(self):
+        self.customer = make_user("joincustomer", "customer")
+        self.seller = make_user("joinseller", "seller")
+        self.race = Race.objects.create(customer=self.customer, product="Bag", budget=100)
+
+    def test_seller_can_join_without_profile_photo(self):
+        self.client.force_login(self.seller)
+        response = self.client.post(f"/race/{self.race.id}/", {
+            "price": "50.00",
+            "details": "Handmade leather bag",
+            "image": jpeg_upload("bag.jpg"),
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            Participant.objects.filter(race=self.race, seller=self.seller, active=True).exists()
+        )
+
+    def test_seller_can_still_add_profile_photo_when_joining(self):
+        self.client.force_login(self.seller)
+        response = self.client.post(f"/race/{self.race.id}/", {
+            "price": "50.00",
+            "details": "Handmade leather bag",
+            "image": jpeg_upload("bag.jpg"),
+            "profile_photo": jpeg_upload("seller.jpg"),
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(sv.get_profile(self.seller).photo)
+
+    def test_join_form_does_not_require_profile_photo(self):
+        self.client.force_login(self.seller)
+        response = self.client.get(f"/race/{self.race.id}/")
+        self.assertEqual(response.status_code, 200)
+        form = response.context["form"]
+        self.assertFalse(form.fields["profile_photo"].required)
 
 
 class QualitySessionTests(TestCase):

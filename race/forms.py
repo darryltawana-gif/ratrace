@@ -99,8 +99,11 @@ class RaceForm(forms.ModelForm):
 
 class JoinForm(forms.ModelForm):
     """Seller entry. Username and the race's product are filled in automatically."""
-    profile_photo = forms.ImageField(label="Your profile photo (identifies you in races)", required=True,
-                                     widget=forms.FileInput(attrs={"accept": "image/*"}))
+    profile_photo = forms.ImageField(
+        label="Your profile photo (optional — helps customers recognise you)",
+        required=False,
+        widget=forms.FileInput(attrs={"accept": "image/*"}),
+        help_text="You can add or change this later from “My photo”.")
 
     class Meta:
         model = Participant
