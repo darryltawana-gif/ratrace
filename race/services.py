@@ -9,6 +9,7 @@ from channels.layers import get_channel_layer
 from django.conf import settings
 from django.db import connection, transaction
 from django.db.models import Count, Q
+from django.template.loader import render_to_string
 from django.utils import timezone
 
 from .models import (Race, Participant, Profile, ChatRoom, ChatMessage,
@@ -164,27 +165,35 @@ def seconds_left(race_id):
     return (r.expires_at - timezone.now()).total_seconds() if r.status == "open" else 0
 
 
-def participant_dict(p):
+def participant_dict(p, review_badges=None):
     photo = getattr(getattr(p.seller, "profile", None), "photo", None)
     category = getattr(getattr(p.seller, "profile", None), "category_label", "")
+    badges = review_badges or []
     return {"id": p.id, "slot": p.slot, "seller_id": p.seller_id, "name": p.display_name,
             "product": p.product_name, "price": str(p.price), "final_price": str(p.final_price),
             "details": p.details, "image": p.image.url, "video": p.video.url if p.video else "",
             "media_verified": p.media_verified, "category": category,
             "photo": photo.url if photo else "",
+            "review_badges": badges,
+            "review_badges_html": render_to_string(
+                "includes/review_badges.html",
+                {"badges": badges, "compact": True, "limit": 2}),
             "discount": p.discount, "delivery": p.delivery, "promo": p.promo,
             "promo_item": p.promo_item, "progress": p.progress}
 
 
 def race_state(race_id):
     r = Race.objects.get(pk=race_id)
-    parts = r.participants.filter(active=True).select_related("seller__profile").order_by("slot")
+    parts = list(r.participants.filter(active=True).select_related("seller__profile").order_by("slot"))
+    badges_by_seller = {p.user_id: p.review_badges
+                        for p in annotated_sellers().filter(user_id__in={x.seller_id for x in parts})}
     return {"race": {"id": r.id, "product": r.product, "budget": str(r.budget),
                      "location": r.location,
                      "status": r.status,
                      "started_at": r.started_at.isoformat(), "expires_at": r.expires_at.isoformat(),
-                     "winner_id": r.winner_id, "slots_left": MAX_SELLERS - parts.count()},
-            "participants": [participant_dict(p) for p in parts]}
+                     "winner_id": r.winner_id, "slots_left": MAX_SELLERS - len(parts)},
+            "participants": [participant_dict(p, badges_by_seller.get(p.seller_id, []))
+                             for p in parts]}
 
 
 def next_slot(race):
@@ -298,7 +307,9 @@ def circle_member_dict(m):
     return {"user": m.seller, "name": m.seller.username,
             "photo": photo.url if photo else "",
             "category": getattr(prof, "category_label", ""),
-            "badge": getattr(prof, "badge", ""), "status": m.status, "id": m.id}
+            "badge": getattr(prof, "badge", ""),
+            "review_badges": getattr(prof, "review_badges", []),
+            "status": m.status, "id": m.id}
 
 
 def pending_requests(user):

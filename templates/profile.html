@@ -9,6 +9,7 @@
       <b style="font-size:1.15rem">{{ user.username }}</b><br>
       {% if profile.category_label %}<span class="chip">{{ profile.category_label }}</span>{% endif %}
       {% include "includes/badge.html" with badge=profile.badge %}
+      {% if profile.role == 'seller' %}{% include "includes/review_badges.html" with badges=profile.review_badges %}{% endif %}
     </div>
   </div>
   <p class="muted" style="margin-top:0">Your photo and username are shown to customers on the home page and on every race.</p>

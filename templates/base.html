@@ -164,6 +164,22 @@
  .circle-item .who span{font-size:.75rem;color:#5a6a8c}
  .side-link{display:block;text-align:center;margin-top:12px}
  .icon3d{display:inline-block;vertical-align:middle;filter:drop-shadow(0 2px 2px rgba(0,0,0,.22))}
+ .review-badges{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
+ .review-badge{display:inline-flex;align-items:center;gap:4px;border:1px solid #d9e1f1;background:#fff;border-radius:999px;
+   padding:2px 9px 2px 4px;font-size:.74rem;font-weight:700;color:#33456b;line-height:1.15;white-space:nowrap;
+   box-shadow:0 1px 2px rgba(11,31,75,.05)}
+ .review-badge .icon3d{width:18px;height:18px;filter:drop-shadow(0 1px 1px rgba(0,0,0,.18))}
+ .review-badge .rb-label{max-width:11em;overflow:hidden;text-overflow:ellipsis}
+ .review-badge .rb-count{font-weight:900;color:#0b1f4b}
+ .review-badge.pos{background:#f1fbf5;border-color:#c6e9d2}
+ .review-badge.neg{background:#fff5f6;border-color:#f2c2ca}
+ .review-badge.neg .rb-count{color:#b30322}
+ .review-badge.more{background:#f1f4fa;color:#5a6a8c;font-weight:800;padding:2px 9px}
+ .review-badges.compact{gap:5px;margin-top:6px}
+ .review-badges.compact .review-badge{font-size:.7rem;padding:1px 7px 1px 3px}
+ .review-badges.compact .review-badge .icon3d{width:16px;height:16px}
+ .seller-card .review-badges,.hall-card .review-badges{justify-content:center}
+ @media (max-width:560px){.review-badge .rb-label{max-width:8.5em}}
  .review-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
  @media (max-width:560px){.review-grid{grid-template-columns:1fr}}
  .review-opt{display:flex;align-items:center;gap:10px;border:1.5px solid #c5d0ea;border-radius:12px;padding:11px 12px;

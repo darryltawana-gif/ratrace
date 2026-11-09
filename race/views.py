@@ -395,7 +395,8 @@ def chat_list(request):
         prof = sv.get_profile(other)
         last = r.messages.order_by("-created", "-id").first()
         items.append({"room": r, "name": sv.display_name(other, r.race),
-                      "photo": prof.photo.url if prof.photo else "", "last": last})
+                      "photo": prof.photo.url if prof.photo else "", "last": last,
+                      "badges": prof.review_badges if prof.role == "seller" else []})
     circles = sv.circle_for_seller(request.user)
     return render(request, "chat_list.html", {"items": items, "seller_circles": circles})
 
@@ -417,6 +418,7 @@ def chat_room(request, room_id):
         "room": room, "race": room.race, "offer": offer, "is_customer": is_customer,
         "other_name": sv.display_name(other, room.race),
         "other_photo": prof.photo.url if prof.photo else "",
+        "other_badges": prof.review_badges if prof.role == "seller" else [],
         "other_id": other.id, "can_review": can_review})
 
 

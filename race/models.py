@@ -40,6 +40,17 @@ REVIEW_OPTIONS = [
 ]
 POSITIVE_OPTIONS = ["good_quality", "comfortable", "reliable", "fair_price"]
 
+# How each aggregate review count is shown on seller cards and profiles.
+# (count key, full label, short label, icon name, tone)
+REVIEW_BADGE_DEFS = [
+    ("good", "Good Quality", "Good Quality", "quality", "pos"),
+    ("comfortable", "Comfortable to talk to", "Comfortable", "comfortable", "pos"),
+    ("reliable", "Very reliable", "Reliable", "reliable", "pos"),
+    ("fair", "Fair Price", "Fair Price", "fair", "pos"),
+    ("poor", "Poor Quality", "Poor Quality", "poor", "neg"),
+    ("unfriendly", "Unfriendly", "Unfriendly", "angry", "neg"),
+]
+
 CIRCLE_TOPICS = [
     ("common", "Find something in common"),
     ("jokes", "Laughter and jokes"),
@@ -157,6 +168,11 @@ class Profile(models.Model):
     def category_label(self):
         return CATEGORY_LABELS.get(self.category, "")
 
+    @property
+    def review_badges(self):
+        """The seller's review counts as neat icon chips, most-mentioned first."""
+        return review_badges_from_counts(self._counts())
+
 
 def review_counts(user):
     """Aggregate a seller's reviews in one query."""
@@ -172,6 +188,20 @@ def review_counts(user):
     return {"good": agg["good"] or 0, "comfortable": agg["comfortable"] or 0,
             "reliable": agg["reliable"] or 0, "fair": agg["fair"] or 0,
             "poor": agg["poor"] or 0, "unfriendly": agg["unfriendly"] or 0}
+
+
+def review_badges_from_counts(counts):
+    """Turn a review-count dict into the chips shown around the platform."""
+    order = {key: i for i, (key, *_rest) in enumerate(REVIEW_BADGE_DEFS)}
+    badges = []
+    for key, label, short, icon, tone in REVIEW_BADGE_DEFS:
+        count = counts.get(key, 0) or 0
+        if count:
+            badges.append({"key": key, "label": label, "short": short,
+                           "icon": icon, "tone": tone, "count": count})
+    # Positive traits first, then the most-mentioned, then the fixed display order.
+    badges.sort(key=lambda b: (b["tone"] != "pos", -b["count"], order[b["key"]]))
+    return badges
 
 
 class Race(models.Model):

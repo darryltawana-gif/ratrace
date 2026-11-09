@@ -167,7 +167,8 @@ function render(s){
     return `<div class="card lane ${won ? 'won' : ''}">
       <div class="lane-head">
         ${p.photo ? `<img class="avatar" src="${esc(p.photo)}">` : '<div class="avatar ph">' + esc(p.name).slice(0,1).toUpperCase() + '</div>'}
-        <div><b>${esc(p.name)}</b><br><span class="muted">${esc(p.category || 'Seller')}</span></div>
+        <div><b>${esc(p.name)}</b><br><span class="muted">${esc(p.category || 'Seller')}</span>
+          ${p.review_badges_html || ''}</div>
         ${won ? '<span class="chip win">🏆 Winner</span>' : ''}
         ${!p.media_verified ? '<span class="tag unverified">Unverified media</span>' : ''}
       </div>

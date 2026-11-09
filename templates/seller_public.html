@@ -9,9 +9,16 @@
  .stat{background:#f7f9fe;border:1px solid #e3e9f5;border-radius:12px;padding:10px 12px;text-align:center}
  .stat b{display:block;font-size:1.35rem;color:#0b1f4b}
  .stat span{font-size:.78rem;color:#5a6a8c;font-weight:700}
- .review-line{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 0;border-bottom:1px dashed #e3e9f5}
+ .review-summary{margin-top:16px;background:#f7f9fe;border:1px solid #e3e9f5;border-radius:14px;padding:12px 14px}
+ .review-summary .rs-head{font-size:.9rem;color:#33456b;font-weight:800;margin-bottom:2px}
+ .review-summary .review-badges{margin-top:8px;gap:7px}
+ .review-summary .review-badge{font-size:.8rem;padding:3px 11px 3px 5px}
+ .review-summary .review-badge .icon3d{width:20px;height:20px}
+ .review-line{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;padding:11px 0;border-bottom:1px dashed #e3e9f5}
  .review-line:last-child{border-bottom:0}
- .review-line .rv{flex:1;min-width:160px}
+ .review-line .rv{flex:1;min-width:180px}
+ .review-line .review-badges{margin-top:6px;gap:5px}
+ .review-line .review-badge{font-size:.74rem;padding:2px 9px 2px 4px}
  .handshake{width:20px;height:20px;vertical-align:-3px;margin-right:4px}
 </style>
 
@@ -61,11 +68,12 @@
     </div>
   </div>
 
-  <div class="stat-grid">
-    <div class="stat"><b>{{ counts.good }}</b><span>Good Quality</span></div>
-    <div class="stat"><b>{{ counts.comfortable }}</b><span>Comfortable to talk to</span></div>
-    <div class="stat"><b>{{ counts.reliable }}</b><span>Very reliable</span></div>
-    <div class="stat"><b>{{ counts.fair }}</b><span>Fair Price</span></div>
+  <div class="review-summary">
+    <div class="rs-head"><b>⭐ What customers say</b></div>
+    {% with badges=seller.review_badges %}
+      {% include "includes/review_badges.html" with badges=badges %}
+      {% if not badges %}<p class="muted" style="margin:0">No customer reviews yet. Reviews are given after a race.</p>{% endif %}
+    {% endwith %}
   </div>
 </div>
 
@@ -94,16 +102,15 @@
 <div class="card">
   {% for r in reviews %}
   <div class="review-line">
-    {% include "includes/review_icon.html" with icon="comfortable" %}
     <div class="rv">
       <b>{{ r.customer.username }}</b>
-      <div class="row" style="gap:6px;margin-top:4px">
-        {% if r.good_quality %}<span class="chip win">Good Quality</span>{% endif %}
-        {% if r.poor_quality %}<span class="chip">Poor Quality</span>{% endif %}
-        {% if r.comfortable %}<span class="chip win">Comfortable to talk to</span>{% endif %}
-        {% if r.reliable %}<span class="chip win">Very reliable</span>{% endif %}
-        {% if r.fair_price %}<span class="chip win">Fair Price</span>{% endif %}
-        {% if r.unfriendly %}<span class="chip">Unfriendly</span>{% endif %}
+      <div class="review-badges">
+        {% if r.good_quality %}<span class="review-badge pos">{% include "includes/review_icon.html" with icon="quality" %}<span class="rb-label">Good Quality</span></span>{% endif %}
+        {% if r.poor_quality %}<span class="review-badge neg">{% include "includes/review_icon.html" with icon="poor" %}<span class="rb-label">Poor Quality</span></span>{% endif %}
+        {% if r.comfortable %}<span class="review-badge pos">{% include "includes/review_icon.html" with icon="comfortable" %}<span class="rb-label">Comfortable</span></span>{% endif %}
+        {% if r.reliable %}<span class="review-badge pos">{% include "includes/review_icon.html" with icon="reliable" %}<span class="rb-label">Reliable</span></span>{% endif %}
+        {% if r.fair_price %}<span class="review-badge pos">{% include "includes/review_icon.html" with icon="fair" %}<span class="rb-label">Fair Price</span></span>{% endif %}
+        {% if r.unfriendly %}<span class="review-badge neg">{% include "includes/review_icon.html" with icon="angry" %}<span class="rb-label">Unfriendly</span></span>{% endif %}
       </div>
     </div>
     <small class="muted">{{ r.created|date:"d M Y" }}</small>

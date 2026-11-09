@@ -5,7 +5,9 @@
  .chatrow:hover{border-color:#d90429}
  .chatrow .t{flex:1;min-width:0}
  .chatrow .t b{display:block}
- .chatrow .t span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .chatrow .t > span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .chatrow .review-badges{margin-top:4px}
+ .chatrow .review-badge span{display:inline;overflow:visible;white-space:nowrap}
  .chatrow small{color:#5a6a8c;white-space:nowrap}
 </style>
 
@@ -15,6 +17,7 @@
   {% if it.photo %}<img class="avatar" src="{{ it.photo }}" alt="">{% else %}<div class="avatar ph">👤</div>{% endif %}
   <div class="t">
     <b>{{ it.name }} <span class="muted" style="display:inline;font-weight:500">· {{ it.room.race.product }}</span></b>
+    {% include "includes/review_badges.html" with badges=it.badges compact=1 limit=2 %}
     <span class="muted">{% if it.last %}{{ it.last.text|truncatechars:70 }}{% else %}No messages yet{% endif %}</span>
   </div>
   {% if it.last %}<small>{{ it.last.created|timesince }} ago</small>{% endif %}

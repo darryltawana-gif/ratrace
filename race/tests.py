@@ -8,7 +8,7 @@ from django.utils import timezone
 from PIL import Image
 
 from . import services as sv
-from .models import (AccountGroup, AccountIdentity, Circle, CircleMember,
+from .models import (AccountGroup, AccountIdentity, ChatRoom, Circle, CircleMember,
                      CircleMessage, Participant, Post, Profile, QualitySession,
                      Race, Report, Review)
 
@@ -175,6 +175,63 @@ class ReviewTests(TestCase):
         })
         self.assertEqual(response.status_code, 302)
         self.assertEqual(Review.objects.filter(race=self.race, seller=self.winner).count(), 1)
+
+
+class ReviewDisplayTests(TestCase):
+    """Review counts appear as icon chips everywhere sellers are shown."""
+
+    def setUp(self):
+        self.customer = make_user("displaybuyer", "customer")
+        self.seller = make_user("displayseller", "seller")
+        self.profile = sv.get_profile(self.seller)
+        for i in range(3):
+            race = Race.objects.create(customer=self.customer, product=f"Item {i}", budget=100)
+            Review.objects.create(race=race, customer=self.customer, seller=self.seller,
+                                  good_quality=True, comfortable=i < 2)
+        race = Race.objects.create(customer=self.customer, product="Last", budget=100)
+        Review.objects.create(race=race, customer=self.customer, seller=self.seller,
+                              poor_quality=True, unfriendly=True)
+        self.race = race
+        self.participant = Participant.objects.create(
+            race=race, seller=self.seller, slot=1, display_name="Display Seller",
+            product_name="Last", price=90, details="", image="products/x.jpg")
+
+    def test_badges_are_sorted_positive_first_then_by_count(self):
+        badges = self.profile.review_badges
+        self.assertEqual([b["key"] for b in badges],
+                         ["good", "comfortable", "poor", "unfriendly"])
+        self.assertEqual(badges[0]["count"], 3)
+        self.assertEqual(badges[1]["count"], 2)
+
+    def test_home_seller_card_shows_counts_with_icons(self):
+        response = self.client.get("/")
+        self.assertContains(response, "displayseller")
+        self.assertContains(response, "Good Quality")
+        self.assertContains(response, "×3")
+        self.assertContains(response, "review-badge")
+
+    def test_seller_profile_shows_all_counts_and_per_review_icons(self):
+        response = self.client.get(f"/seller/{self.seller.id}/")
+        self.assertContains(response, "What customers say")
+        self.assertContains(response, "×3")
+        self.assertContains(response, "×2")
+        self.assertContains(response, "review-badge pos")
+        self.assertContains(response, "review-badge neg")
+
+    def test_race_state_embeds_badges_for_seller_lane(self):
+        state = sv.race_state(self.race.id)
+        participant = state["participants"][0]
+        self.assertEqual(participant["review_badges"][0]["key"], "good")
+        self.assertIn("Good Quality", participant["review_badges_html"])
+        self.assertIn("×3", participant["review_badges_html"])
+
+    def test_chat_screens_show_seller_badges(self):
+        room = ChatRoom.objects.create(race=self.race, customer=self.customer, seller=self.seller)
+        self.client.force_login(self.customer)
+        response = self.client.get("/chats/")
+        self.assertContains(response, "Good Quality")
+        response = self.client.get(f"/chat/{room.id}/")
+        self.assertContains(response, "Good Quality")
 
 
 class PrivacyTests(TestCase):

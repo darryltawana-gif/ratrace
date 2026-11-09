@@ -1,0 +1,15 @@
+{% if badges %}
+<div class="review-badges{% if compact %} compact{% endif %}" aria-label="Customer review scores">
+  {% for b in badges %}
+    {% if limit and forloop.counter > limit %}{% else %}
+    <span class="review-badge {{ b.tone }}" title="{{ b.count }} customer{{ b.count|pluralize }} said “{{ b.label }}”">
+      {% include "includes/review_icon.html" with icon=b.icon %}
+      <span class="rb-label">{{ b.short }}</span><b class="rb-count">×{{ b.count }}</b>
+    </span>
+    {% endif %}
+  {% endfor %}
+  {% if limit and badges|length > limit %}
+    <span class="review-badge more" title="Open the seller profile to see every review">+ more</span>
+  {% endif %}
+</div>
+{% endif %}

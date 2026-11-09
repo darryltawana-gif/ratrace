@@ -6,7 +6,9 @@
  .member .avatar{width:46px;height:46px}
  .member .who{flex:1;min-width:0}
  .member .who b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
- .member .who span{font-size:.76rem;color:#5a6a8c}
+ .member .who > span{font-size:.76rem;color:#5a6a8c}
+ .member .review-badges{margin-top:4px}
+ .member .review-badge span{font-size:.7rem;color:inherit}
  .member .open{display:flex;gap:10px;align-items:center;flex:1;min-width:0;text-decoration:none;color:inherit}
  .member .rm-btn{padding:7px 12px;font-size:.84rem;white-space:nowrap}
  .topic-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -30,7 +32,8 @@
   {% for m in pending %}
   <div class="member" style="border:0;padding:8px 0">
     {% if m.photo %}<img class="avatar" src="{{ m.photo }}" alt="">{% else %}<div class="avatar ph">{{ m.name|slice:":1"|upper }}</div>{% endif %}
-    <span class="who"><b>{{ m.name }}</b><span>Request sent — waiting for the seller</span></span>
+    <div class="who"><b>{{ m.name }}</b><span>Request sent — waiting for the seller</span>
+      {% include "includes/review_badges.html" with badges=m.review_badges compact=1 limit=1 %}</div>
   </div>
   {% endfor %}
 </div>
@@ -43,7 +46,8 @@
   <div class="member">
     <a class="open" href="{% url 'seller_public' m.user.id %}">
       {% if m.photo %}<img class="avatar" src="{{ m.photo }}" alt="">{% else %}<div class="avatar ph">{{ m.name|slice:":1"|upper }}</div>{% endif %}
-      <span class="who"><b>{{ m.name }}</b><span>{{ m.category|default:"Seller" }}</span></span>
+      <div class="who"><b>{{ m.name }}</b><span>{{ m.category|default:"Seller" }}</span>
+        {% include "includes/review_badges.html" with badges=m.review_badges compact=1 limit=1 %}</div>
     </a>
     <form method="post" action="{% url 'circle_remove' m.id %}" style="margin:0"
           onsubmit="return confirm('Remove {{ m.name|escapejs }} from your Circle?')">{% csrf_token %}
@@ -75,7 +79,8 @@
   {% for s in suggestions %}
   <div class="member">
     {% if s.photo %}<img class="avatar" src="{{ s.photo.url }}" alt="">{% else %}<div class="avatar ph">{{ s.user.username|slice:":1"|upper }}</div>{% endif %}
-    <span class="who"><b>{{ s.user.username }}</b><span>{{ s.category_label|default:"Seller" }}</span></span>
+    <div class="who"><b>{{ s.user.username }}</b><span>{{ s.category_label|default:"Seller" }}</span>
+      {% include "includes/review_badges.html" with badges=s.review_badges compact=1 limit=1 %}</div>
     <form method="post" action="{% url 'circle_request' s.user.id %}" style="margin:0">{% csrf_token %}
       <button class="btn small navy">Add</button></form>
   </div>
@@ -122,8 +127,9 @@
     <a class="member" href="{% url 'seller_public' cm.seller.id %}" style="text-decoration:none;color:inherit">
       {% if cm.seller.profile.photo %}<img class="avatar" src="{{ cm.seller.profile.photo.url }}" alt="">
       {% else %}<div class="avatar ph">{{ cm.seller.username|slice:":1"|upper }}</div>{% endif %}
-      <span class="who"><b>{{ cm.seller.username }}{% if cm.seller.id == user.id %} (You){% endif %}</b>
-        <span>{{ cm.seller.profile.category_label|default:"Seller" }}</span></span>
+      <div class="who"><b>{{ cm.seller.username }}{% if cm.seller.id == user.id %} (You){% endif %}</b>
+        <span>{{ cm.seller.profile.category_label|default:"Seller" }}</span>
+        {% include "includes/review_badges.html" with badges=cm.seller.profile.review_badges compact=1 limit=1 %}</div>
     </a>
     {% endfor %}
   </div>

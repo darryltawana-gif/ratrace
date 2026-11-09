@@ -30,7 +30,8 @@
   <div class="chathead">
     <a class="btn small ghost" href="{% url 'chat_list' %}">← Chats</a>
     {% if other_photo %}<img class="avatar" src="{{ other_photo }}" alt="">{% else %}<div class="avatar ph" style="background-color:#ffffff">👤</div>{% endif %}
-    <div class="who"><b>{{ other_name }}</b><span>About “{{ race.product }}”</span></div>
+    <div class="who"><b>{{ other_name }}</b><span>About “{{ race.product }}”</span>
+      {% include "includes/review_badges.html" with badges=other_badges compact=1 limit=2 %}</div>
     {% if can_review %}<a class="btn small" href="{% url 'review_seller' race.id other_id %}?next=chat">⭐ Review seller</a>{% endif %}
     <button type="button" class="btn small ghost" id="sd-open">🕵️ Check for scam</button>
     <span id="status" class="chip">Connecting…</span>

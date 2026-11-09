@@ -42,7 +42,7 @@
  /* Hall of Fame: one horizontal row, scroll left-to-right */
  .hall-scroll{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:4px 2px 12px;
    -webkit-overflow-scrolling:touch}
- .hall-scroll .hall-card{min-width:250px;max-width:250px;scroll-snap-align:start;display:flex;gap:12px;align-items:center;
+ .hall-scroll .hall-card{min-width:290px;max-width:290px;scroll-snap-align:start;display:flex;gap:12px;align-items:center;
    background:#fff;border:1px solid var(--border);border-radius:14px;padding:12px}
  .hall-scroll .hall-card .avatar{width:48px;height:48px}
  .hall-scroll .hall-card .hc{flex:1;min-width:0}
@@ -177,7 +177,8 @@
     {% for m in circle_members %}
       <a class="person" href="{% url 'seller_public' m.user.id %}">
         {% if m.photo %}<img class="avatar" src="{{ m.photo }}" alt="">{% else %}<div class="avatar ph">{{ m.name|slice:":1"|upper }}</div>{% endif %}
-        <span><b>{{ m.name }}</b><span>{{ m.category|default:"Seller" }}</span></span>
+        <span><b>{{ m.name }}</b><span>{{ m.category|default:"Seller" }}</span>
+          {% include "includes/review_badges.html" with badges=m.review_badges compact=1 limit=1 %}</span>
       </a>
     {% empty %}
       <p class="muted" style="margin:0">Your Circle is empty. Open a seller and tap <b>Add to My Circle</b>.</p>
@@ -201,9 +202,9 @@
   {% for p in hall %}
   <a class="hall-card" href="{% url 'seller_public' p.user.id %}" style="text-decoration:none;color:inherit">
     {% if p.photo %}<img class="avatar" src="{{ p.photo.url }}" alt="">{% else %}<div class="avatar ph">{{ p.user.username|slice:":1"|upper }}</div>{% endif %}
-    <span class="hc"><b>{{ p.user.username }}</b>
-      <small>Good Quality ×{{ p.good_count }} · Comfortable ×{{ p.comfortable_count }}</small></span>
-    {% include "includes/badge.html" with badge=p.badge %}
+    <div class="hc"><b>{{ p.user.username }}</b>
+      {% include "includes/review_badges.html" with badges=p.review_badges compact=1 limit=2 %}
+      {% include "includes/badge.html" with badge=p.badge %}</div>
   </a>
   {% empty %}
   <p class="muted">No one has reached the Hall of Fame yet.</p>
@@ -226,6 +227,7 @@
     {% else %}<div class="avatar ph" style="width:64px;height:64px;font-size:1.5rem">{{ s.user.username|slice:":1"|upper }}</div>{% endif %}
     <span class="nm">{{ s.user.username }}</span>
     {% if s.category_label %}<span class="cat">{{ s.category_label }}</span>{% endif %}
+    {% include "includes/review_badges.html" with badges=s.review_badges compact=1 limit=2 %}
     {% include "includes/badge.html" with badge=s.badge %}
     {% if s.wins %}<span class="wins">🏆 {{ s.wins }} win{{ s.wins|pluralize }}</span>{% endif %}
   </a>
