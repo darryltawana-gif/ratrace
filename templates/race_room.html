@@ -225,25 +225,20 @@ function connect(){
     const d = JSON.parse(e.data);
     if (d.type === 'state') render(d.state);
     else if (d.type === 'event') { toast(d.message); beep(); notify('The Rat Race', d.message, location.href); }
-    else if (d.type === 'quality_request') {
-      const b = document.getElementById('qpCustomer');
-      if (b){ b.classList.add('qp-glow'); b.textContent = '👁 View Quality — ' + d.seller + ' is live'; }
-      const h = document.getElementById('qpHint');
-      if (h) h.textContent = d.seller + ' is ready to show you a live Quality Proof video. Tap View Quality.';
-      beep();
-      if (navigator.vibrate) navigator.vibrate([180, 90, 180]);
-      toast('🎥 ' + d.seller + ' sent a live Quality Proof');
+    else if (d.type === 'quality_state' || d.type === 'quality_request') {
+      updateQualityButton(d);
     }
     else if (d.type === 'quality_denied') {
       toast(d.message);
       setQStatus(d.message);
     }
     else if (d.type === 'quality_over') {
-      const b = document.getElementById('qpCustomer');
-      if (b){ b.classList.remove('qp-glow'); b.textContent = '👁 View Quality'; }
+      updateQualityButton({ active: false });
     }
     else if (d.type === 'race_over') {
       live = false; showOver(d.message); notify('Race over', d.message, '/');
+      if (document.getElementById('qmodal').classList.contains('show')) closeQualitySilently();
+      updateQualityButton({ active: false });
       if (d.chat_url && Number(d.winner_user_id) === ME) {
         const a = document.getElementById('overchat'); a.href = d.chat_url; a.style.display = 'inline-flex';
       }
@@ -266,7 +261,8 @@ setInterval(() => {
 /* ---------------- Quality Proof: live product video (up to 48 minutes) ---------------- */
 const ICE = { iceServers: JSON.parse(document.getElementById('ice-config').textContent) };
 let qws = null, pc = null, localStream = null, qTimer = null, qLeft = QSEC;
-let pendingIce = [], qClosing = false, qAttempts = 0, qRetryTimer = null;
+let pendingIce = [], qClosing = false, qAttempts = 0, qRetryTimer = null, qWatch = null;
+let QP_SELLER = null, QP_SELLER_NAME = '';
 
 function setQStatus(t){ const el = document.getElementById('qstatus'); if (el) el.textContent = t; }
 function qsend(o){ if (qws && qws.readyState === 1) qws.send(JSON.stringify(o)); }
@@ -280,8 +276,51 @@ function setCountdown(seconds){
   if (el) el.textContent = fmtTime(qLeft);
 }
 
+/* If the network blocks WebRTC (no ICE candidates), the connection can sit
+   on "Connecting…" forever. After a while, say so plainly and offer Reconnect. */
+function startConnWatch(){
+  clearTimeout(qWatch);
+  qWatch = setTimeout(() => {
+    if (!document.getElementById('qmodal').classList.contains('show')) return;
+    if (pc && pc.connectionState === 'connected') return;
+    setQStatus('The video could not connect. Check your network, then tap Reconnect.');
+  }, 20000);
+}
+function stopConnWatch(){ clearTimeout(qWatch); qWatch = null; }
+
+/* Light up (or reset) the customer's View Quality button from server state. */
+function updateQualityButton(d){
+  const b = document.getElementById('qpCustomer');
+  if (!b) return;                       // sellers have no customer button
+  const h = document.getElementById('qpHint');
+  const modalOpen = document.getElementById('qmodal').classList.contains('show');
+  if (d && d.active) {
+    const sellerId = Number(d.seller_id) || null;
+    // Do not switch the button to another seller while this customer is
+    // already watching someone.
+    if (modalOpen && QP_SELLER && sellerId && sellerId !== QP_SELLER) return;
+    const wasActive = b.classList.contains('qp-glow');
+    QP_SELLER = sellerId;
+    QP_SELLER_NAME = d.seller || 'A seller';
+    b.classList.add('qp-glow');
+    b.textContent = '👁 View Quality — ' + QP_SELLER_NAME + ' is live';
+    if (h) h.textContent = QP_SELLER_NAME + ' is showing a live Quality Proof video. Tap View Quality to watch.';
+    if (!wasActive) {
+      beep();
+      if (navigator.vibrate) navigator.vibrate([180, 90, 180]);
+      toast('🎥 ' + QP_SELLER_NAME + ' is live — tap View Quality');
+    }
+  } else {
+    QP_SELLER = null;
+    b.classList.remove('qp-glow');
+    b.textContent = '👁 View Quality';
+    if (h) h.textContent = 'A seller can send you a live Quality Proof video for up to 48 minutes. This button will light up when one does.';
+  }
+}
+
 function startQualityProof(){
-  send({ action: 'quality_request' });
+  // The camera is opened first; the proof goes live for the customer only
+  // once the signalling socket is actually connected.
   openQuality();
 }
 
@@ -315,6 +354,7 @@ async function openQuality(){
   qClosing = false; qAttempts = 0;
   setCountdown(QSEC);
   if (!IS_OWNER) {
+    // The seller is the one who streams.
     setQStatus('Starting camera…');
     try { await startCamera(); }
     catch (e) {
@@ -322,7 +362,13 @@ async function openQuality(){
       return;
     }
   } else {
-    setQStatus('Connecting to the seller…');
+    // The customer only watches. If no seller is live there is nothing to
+    // connect to yet, so explain instead of opening a dead connection.
+    if (!QP_SELLER) {
+      setQStatus('No seller is showing a Quality Proof right now. This button lights up when one starts.');
+      return;
+    }
+    setQStatus('Connecting to ' + (QP_SELLER_NAME || 'the seller') + '…');
   }
   connectQuality();
 }
@@ -342,24 +388,31 @@ function startLocalCountdown(seconds){
 
 function connectQuality(){
   if (qws) { try { qws.onclose = null; qws.close(); } catch (e) {} qws = null; }
-  qws = new WebSocket(`${wsScheme}://${location.host}/ws/quality/${RACE_ID}/`);
+  // Sellers identify themselves; customers name the seller they tapped.
+  const seller = IS_OWNER ? QP_SELLER : ME;
+  const query = seller ? `?seller=${seller}` : '';
+  qws = new WebSocket(`${wsScheme}://${location.host}/ws/quality/${RACE_ID}/${query}`);
   qws.onopen = () => { qAttempts = 0; setQStatus('Connected. Waiting for the other person…'); };
   qws.onmessage = async e => {
     const d = JSON.parse(e.data);
     if (d.type === 'ready') {
+      if (d.seller) QP_SELLER_NAME = d.seller;
       startLocalCountdown(d.seconds);
-      setQStatus(d.role === 'seller' ? 'Waiting for the customer to open the video…' : 'Connecting to the seller…');
-      if (d.role === 'customer') qsend({ kind: 'hello' });
+      setQStatus(d.role === 'seller'
+        ? 'Camera on. Waiting for the customer to open the video…'
+        : 'Connecting to ' + (QP_SELLER_NAME || 'the seller') + '…');
+      if (d.role === 'customer') { startConnWatch(); qsend({ kind: 'hello' }); }
     } else if (d.type === 'denied') {
       qClosing = true;
       setQStatus(d.message);
       toast(d.message);
       clearInterval(qTimer); endStream();
-      setTimeout(closeQualitySilently, 1800);
+      setTimeout(closeQualitySilently, 2600);
     } else if (d.type === 'peer_join') {
       const otherRole = IS_OWNER ? 'seller' : 'customer';
       if (d.role === otherRole) {
         setQStatus('The other person joined. Connecting video…');
+        startConnWatch();
         // The seller starts the offer as soon as the customer appears.
         if (!IS_OWNER && localStream) setTimeout(() => { if (!pc) makeOffer(); }, 150);
         else if (IS_OWNER) setTimeout(() => qsend({ kind: 'hello' }), 250);
@@ -367,9 +420,14 @@ function connectQuality(){
     } else if (d.type === 'signal') {
       await onSignal(d);
     } else if (d.type === 'peer_left') {
+      const myRole = IS_OWNER ? 'customer' : 'seller';
+      if (d.role === myRole) return;   // our own departure, echoed back
       if (IS_OWNER) {
-        setQStatus('The seller closed the video.');
-        setTimeout(closeQualitySilently, 1200);
+        // The seller stopped or their connection dropped. They can start
+        // again inside the same window, so leave the button ready.
+        clearInterval(qTimer); endStream();
+        setQStatus('The seller paused the video. The View Quality button will light up when they start again.');
+        setTimeout(closeQualitySilently, 2600);
       } else {
         // The customer closed their viewer. Keep the camera and session
         // open so they can come straight back, but drop the old peer
@@ -381,11 +439,11 @@ function connectQuality(){
     } else if (d.type === 'stopped') {
       clearInterval(qTimer); endStream();
       setQStatus('The seller has finished the Quality Proof.');
-      setTimeout(closeQualitySilently, 1400);
+      setTimeout(closeQualitySilently, 1600);
     } else if (d.type === 'time_up') {
       clearInterval(qTimer); endStream();
       setQStatus('Time is up — this Quality Proof has ended.');
-      setTimeout(closeQualitySilently, 1400);
+      setTimeout(closeQualitySilently, 1600);
     }
   };
   qws.onclose = () => {
@@ -408,6 +466,7 @@ function makePC(){
   if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === 'connected') {
+      stopConnWatch();
       setQStatus(IS_OWNER ? 'Live — you are watching the seller.' : 'Live — the customer can see your video.');
     } else if (['failed', 'disconnected'].includes(pc.connectionState)) {
       setQStatus('The video connection dropped. Reconnecting…');
@@ -435,6 +494,9 @@ async function makeOffer(){
 }
 
 async function onSignal(d){
+  // The signalling group includes us, so our own offer/answer/ICE messages
+  // come back to us. Processing them would tear down our own connection.
+  if (d.from && d.from === (IS_OWNER ? 'customer' : 'seller')) return;
   if (d.kind === 'hello') {
     // Seller answers the customer's greeting with a video offer.
     if (!IS_OWNER && localStream) await makeOffer();
@@ -457,6 +519,7 @@ async function onSignal(d){
 
 function endStream(){
   clearInterval(qTimer);
+  stopConnWatch();
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
   if (pc) { try { pc.close(); } catch (e) {} pc = null; }
   pendingIce = [];
@@ -464,9 +527,14 @@ function endStream(){
 
 async function retryVideo(){
   clearTimeout(qRetryTimer);
+  stopConnWatch();
   qClosing = false; qAttempts = 0;
   if (pc) { try { pc.close(); } catch (e) {} pc = null; }
   pendingIce = [];
+  if (IS_OWNER && !QP_SELLER) {
+    setQStatus('No seller is showing a Quality Proof right now. This button lights up when one starts.');
+    return;
+  }
   if (!IS_OWNER && !localStream) {
     setQStatus('Restarting camera…');
     try { await startCamera(); }

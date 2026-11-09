@@ -248,6 +248,8 @@ def customer_exit(request, race_id):
     if race.status == "open":
         race.status = "closed"
         race.save()
+        sv.end_quality_for_race(race.id)
+        sv.broadcast(f"race_{race.id}", {"type": "quality_over"})
         sv.broadcast(f"race_{race.id}", {"type": "race_over", "message": "🚪 The customer closed the race. GAME OVER."})
         sv.broadcast("lobby", {"type": "race_ended", "race_id": race.id,
                                "message": f"Customer closed the race for “{race.product}”. Game over."})
@@ -280,6 +282,7 @@ def pick_winner(request, race_id, pid):
 
     race.status, race.winner = "won", p
     race.save()
+    sv.end_quality_for_race(race.id)
     Profile.objects.filter(user=p.seller).update(wins=F("wins") + 1)
 
     room, _ = sv.get_room(race, p.seller)
@@ -309,8 +312,10 @@ def seller_leave(request, race_id):
         p.save()
     if entries:
         p = entries[0]
+        sv.end_quality_for_seller(race_id, request.user.id)
         sv.broadcast(f"race_{race_id}", {"type": "event", "message": f"{p.display_name} left the race."})
         sv.broadcast(f"race_{race_id}", {"type": "state", "state": sv.race_state(race_id)})
+        sv.broadcast(f"race_{race_id}", {"type": "quality_state", **sv.quality_payload(race_id)})
         sv.broadcast("lobby", {"type": "slots_changed",
                                "message": f"A spot opened in the race for “{p.race.product}”. Jump in!"})
     return redirect("home")

@@ -150,10 +150,13 @@ def end_message(race):
 def expire_races():
     for r in list(Race.objects.filter(status="open", expires_at__lte=timezone.now())):
         if Race.objects.filter(pk=r.pk, status="open").update(status="expired"):
+            # A proof cannot outlive the race it belongs to.
+            end_quality_for_race(r.id)
             broadcast("lobby", {"type": "race_ended", "race_id": r.id,
                                 "message": f"Race for “{r.product}” expired."})
             broadcast(f"race_{r.id}", {"type": "race_over",
                                        "message": f"⏰ Time is up. The race expired after {RACE_MINUTES} minutes. GAME OVER."})
+            broadcast(f"race_{r.id}", {"type": "quality_over"})
 
 
 def seconds_left(race_id):
@@ -436,7 +439,13 @@ def race_access(user, race_id):
 
 
 def can_stream_quality(user, race_id):
-    race = Race.objects.filter(pk=race_id, status="open", expires_at__gt=timezone.now()).first()
+    """Who may open the Quality Proof signalling socket for a race.
+
+    Whether a proof is actually live is checked separately. Keeping this
+    check about *access* means a customer who taps View Quality too early
+    gets a friendly explanation instead of a silent disconnect.
+    """
+    race = Race.objects.filter(pk=race_id).first()
     if not race:
         return False
     if race.customer_id == user.id:
@@ -449,26 +458,53 @@ def race_role(user, race_id):
     return "customer" if race.customer_id == user.id else "seller"
 
 
-def start_quality_session(user, race_id):
-    """Start (or resume) the single Quality Proof this seller gets per race."""
+def start_quality_session(user, race_id, connection_id=None):
+    """Start or resume the seller's Quality Proof window for this race.
+
+    A seller gets one time window per race (``QUALITY_SECONDS``, 48 minutes
+    by default). Inside that window they may stop, fix the camera and start
+    again as many times as they need: stopping only pauses the stream, it
+    does not burn the window. The window itself always counts from the very
+    first start, so refreshing or reconnecting never gives extra time.
+
+    ``connection_id`` identifies the signalling socket that is taking over
+    the proof. A late disconnect from an old socket can then be ignored
+    instead of pausing a session a newer socket has already resumed.
+    """
     race = Race.objects.filter(pk=race_id, status="open", expires_at__gt=timezone.now()).first()
     if not race or not race.participants.filter(seller=user, active=True).exists():
         return None
-    session, created = QualitySession.objects.get_or_create(
-        race=race, seller=user, defaults={"started_at": timezone.now()})
-    if created:
+    now = timezone.now()
+    with transaction.atomic():
+        session = (QualitySession.objects.select_for_update()
+                   .filter(race=race, seller=user).first())
+        if session is None:
+            return QualitySession.objects.create(
+                race=race, seller=user, started_at=now,
+                connection_id=connection_id or "")
+        # The 48-minute window has run out: it can never be restarted.
+        if session.started_at <= now - timedelta(seconds=QUALITY_SECONDS):
+            if not session.ended_at:
+                session.ended_at = now
+                session.connection_id = ""
+                session.save(update_fields=["ended_at", "connection_id"])
+            return None
+        # Stopping the video pauses the session. Starting again inside the
+        # same window clears the pause marker so the stream can be shown.
+        fields = []
+        if session.ended_at:
+            session.ended_at = None
+            fields.append("ended_at")
+        if connection_id is not None and session.connection_id != connection_id:
+            session.connection_id = connection_id
+            fields.append("connection_id")
+        if fields:
+            session.save(update_fields=fields)
         return session
-    # A previous proof was already used or has run out: do not restart it.
-    if session.ended_at or session.started_at <= timezone.now() - timedelta(seconds=QUALITY_SECONDS):
-        if not session.ended_at:
-            session.ended_at = timezone.now()
-            session.save(update_fields=["ended_at"])
-        return None
-    return session
 
 
 def quality_for_race(race_id, seller_id=None):
-    """The live proof window for a race (optionally for one seller)."""
+    """The proof that is live right now (optionally for one seller)."""
     cutoff = timezone.now() - timedelta(seconds=QUALITY_SECONDS)
     qs = QualitySession.objects.filter(
         race_id=race_id, ended_at__isnull=True, started_at__gt=cutoff)
@@ -481,8 +517,55 @@ def quality_seconds_left(session):
     return session.seconds_left() if session else 0
 
 
+def quality_session_payload(session):
+    """The shape the race page uses to light up the customer's button."""
+    if not session:
+        return {"active": False}
+    return {"active": True, "seller_id": session.seller_id,
+            "seller": session.seller.username,
+            "seconds": quality_seconds_left(session)}
+
+
+def quality_seller_name(session_id):
+    return (QualitySession.objects.filter(pk=session_id)
+            .values_list("seller__username", flat=True).first() or "")
+
+
+def quality_payload(race_id, seller_id=None):
+    return quality_session_payload(quality_for_race(race_id, seller_id))
+
+
 def end_quality_session(session_id):
-    QualitySession.objects.filter(pk=session_id, ended_at__isnull=True).update(ended_at=timezone.now())
+    """Pause/close the proof stream. A seller can resume inside the window."""
+    QualitySession.objects.filter(pk=session_id, ended_at__isnull=True).update(
+        ended_at=timezone.now(), connection_id="")
+
+
+def release_quality_session(session_id, connection_id):
+    """Pause a proof only if this signalling socket still owns it.
+
+    Returns the number of rows changed, so a stale socket that disconnects
+    after a newer socket has taken over can stay quiet instead of pausing
+    (or announcing) the live proof.
+    """
+    if not session_id or not connection_id:
+        return 0
+    return QualitySession.objects.filter(
+        pk=session_id, connection_id=connection_id, ended_at__isnull=True
+    ).update(ended_at=timezone.now(), connection_id="")
+
+
+def end_quality_for_race(race_id):
+    """Close every proof for a race (used when the race ends)."""
+    QualitySession.objects.filter(race_id=race_id, ended_at__isnull=True).update(
+        ended_at=timezone.now(), connection_id="")
+
+
+def end_quality_for_seller(race_id, seller_id):
+    """Close one seller's proof (used when they leave the race)."""
+    QualitySession.objects.filter(race_id=race_id, seller_id=seller_id,
+                                  ended_at__isnull=True).update(
+        ended_at=timezone.now(), connection_id="")
 
 
 # ------------------------------- Private chat -------------------------------

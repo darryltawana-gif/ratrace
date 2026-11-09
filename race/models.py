@@ -238,6 +238,9 @@ class QualitySession(models.Model):
                                related_name="quality_sessions")
     started_at = models.DateTimeField(default=timezone.now)
     ended_at = models.DateTimeField(blank=True, null=True)
+    # Identifies the seller's current signalling socket. An old socket that
+    # disconnects late must not pause a session a newer socket has resumed.
+    connection_id = models.CharField(max_length=36, blank=True, default="")
 
     class Meta:
         unique_together = [("race", "seller")]

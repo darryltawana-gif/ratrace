@@ -215,8 +215,14 @@ class QualitySessionTests(TestCase):
         session = sv.start_quality_session(self.seller, self.race.id)
         self.assertIsNotNone(session)
         self.assertIsNotNone(sv.start_quality_session(self.seller, self.race.id))
+        # Stopping the video pauses the proof; the seller may start again
+        # inside the same 48-minute window.
         sv.end_quality_session(session.id)
-        self.assertIsNone(sv.start_quality_session(self.seller, self.race.id))
+        resumed = sv.start_quality_session(self.seller, self.race.id)
+        self.assertIsNotNone(resumed)
+        self.assertEqual(resumed.id, session.id)
+        self.assertIsNone(resumed.ended_at)
+        self.assertEqual(QualitySession.objects.filter(race=self.race).count(), 1)
 
     def test_window_expires_on_server_clock(self):
         session = sv.start_quality_session(self.seller, self.race.id)
@@ -224,6 +230,33 @@ class QualitySessionTests(TestCase):
             started_at=timezone.now() - timedelta(seconds=sv.QUALITY_SECONDS + 1))
         self.assertIsNone(sv.start_quality_session(self.seller, self.race.id))
         self.assertIsNone(sv.quality_for_race(self.race.id))
+
+    def test_paused_proof_is_not_offered_to_customers(self):
+        session = sv.start_quality_session(self.seller, self.race.id)
+        self.assertTrue(sv.quality_payload(self.race.id)["active"])
+        sv.end_quality_session(session.id)
+        self.assertFalse(sv.quality_payload(self.race.id)["active"])
+        # ...but the seller can bring it back inside the window.
+        sv.start_quality_session(self.seller, self.race.id)
+        payload = sv.quality_payload(self.race.id)
+        self.assertTrue(payload["active"])
+        self.assertEqual(payload["seller_id"], self.seller.id)
+
+    def test_stale_connection_cannot_pause_a_resumed_proof(self):
+        session = sv.start_quality_session(
+            self.seller, self.race.id, connection_id="old")
+        self.assertIsNotNone(session)
+        resumed = sv.start_quality_session(
+            self.seller, self.race.id, connection_id="new")
+        self.assertEqual(resumed.id, session.id)
+        # A late disconnect from the replaced socket must be ignored.
+        self.assertEqual(sv.release_quality_session(session.id, "old"), 0)
+        self.assertTrue(sv.quality_payload(self.race.id)["active"])
+        # The socket that still owns the proof can pause it.
+        self.assertEqual(sv.release_quality_session(session.id, "new"), 1)
+        self.assertFalse(sv.quality_payload(self.race.id)["active"])
+        self.assertEqual(
+            QualitySession.objects.get(pk=session.id).connection_id, "")
 
     def test_quality_window_is_48_minutes(self):
         self.assertEqual(sv.QUALITY_SECONDS, 48 * 60)
