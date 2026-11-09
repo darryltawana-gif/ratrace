@@ -49,6 +49,7 @@
   <div class="chathead">
     <a class="btn small ghost" href="{% url 'my_circle' %}">← My Circle</a>
     <div class="who"><b>👥 {{ circle.customer.username }}'s Circle</b><span>Group chat · everyone in the Circle sees every message</span></div>
+    <button type="button" class="btn small ghost" id="sd-open">🕵️ Check for scam</button>
     <span id="status" class="chip">Connecting…</span>
   </div>
 
@@ -84,6 +85,7 @@
     <button id="send" type="button" class="btn" disabled>Send</button>
   </div>
 </div>
+{% include "_scam_modal.html" %}
 {% endblock %}
 
 {% block scripts %}
@@ -125,6 +127,7 @@ function addMsg(m, stick){
   const el = document.createElement('div');
   el.className = 'bub ' + (m.sender_id === ME ? 'me' : 'them');
   el.dataset.mid = m.id;
+  el.dataset.text = m.text;
   if (m.sender_id !== ME){ const n = document.createElement('div'); n.className = 'nm'; n.textContent = m.sender; el.appendChild(n); }
   const t = document.createElement('div'); t.textContent = m.text; el.appendChild(t);
   const tp = document.createElement('div'); tp.className = 'tp'; tp.textContent = '#' + (m.topic_label || 'Any other talks'); el.appendChild(tp);
@@ -228,6 +231,15 @@ document.addEventListener('click', e => {
     document.querySelectorAll('.picker.show').forEach(p => p.classList.remove('show'));
   }
 });
+const sdOpen = document.getElementById('sd-open');
+if (sdOpen) sdOpen.onclick = () => {
+  const last = [...document.querySelectorAll('.bub.them')].pop();
+  ScamDoctor.open({
+    source: 'circle_chat',
+    messageId: last ? last.dataset.mid : null,
+    text: last ? (last.dataset.text || '') : ''
+  });
+};
 applyTopic(currentTopic, cfg.topicLabel);
 connect();
 </script>

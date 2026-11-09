@@ -194,6 +194,7 @@
   {% if user.is_authenticated %}<a href="{% url 'my_circle' %}">🤝 My Circle{% if circle_pending %} <span class="chip win">{{ circle_pending }}</span>{% endif %}</a>{% endif %}
   {% if role == 'seller' %}<a href="{% url 'my_posts' %}">🛍 My Posts</a>{% endif %}
   <a href="{% url 'comments' %}">Comments</a>
+  <a href="{% url 'scamdoctor:checker' %}">🕵️ Scam Doctor</a>
   {% if user.is_authenticated %}
     <a href="{% url 'chat_list' %}">💬 Chats</a>
     {% if role == 'none' %}
@@ -237,11 +238,11 @@ document.getElementById('clearall').onclick = () => {
   document.querySelectorAll('#toasts .toast').forEach(t => t.remove());
   syncClear();
 };
-function toast(msg, url){
+function toast(msg, url, linkText){
   const box = document.getElementById('toasts');
   const d = document.createElement('div'); d.className = 'toast'; d.setAttribute('role', 'alert');
   const t = document.createElement('span'); t.textContent = msg; d.appendChild(t);
-  if (url){ const a = document.createElement('a'); a.href = url; a.textContent = 'Open chat →'; d.appendChild(a); }
+  if (url){ const a = document.createElement('a'); a.href = url; a.textContent = linkText || 'Open chat →'; d.appendChild(a); }
   const x = document.createElement('button'); x.type = 'button'; x.className = 'x';
   x.setAttribute('aria-label', 'Dismiss message'); x.textContent = '×';
   x.onclick = () => { d.remove(); syncClear(); };
@@ -370,6 +371,10 @@ window.addEventListener('pageshow', e => {
       if (!(window.CURRENT_CHAT && Number(window.CURRENT_CHAT) === Number(d.room_id))){
         toast(d.message, d.url); beep(); notify('💬 The Rat Race', d.message, d.url, 'chat-' + d.room_id);
       }
+    } else if (d.type === 'scam_warning'){
+      // Private warning from Scam Doctor. Never shown to the sender.
+      toast(d.message, d.url, 'Review'); beep();
+      notify('🕵️ Scam Doctor', d.message, d.url, 'scam-' + d.scan_id);
     } else if (d.type === 'race_started' && ROLE !== 'customer'){
       toast(d.message); beep(); notify('🟢 New race started!', d.message, '/race/' + d.race.id + '/', 'race-' + d.race.id);
     } else if (d.message && !d.silent){ toast(d.message); }

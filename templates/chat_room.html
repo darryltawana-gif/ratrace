@@ -32,6 +32,7 @@
     {% if other_photo %}<img class="avatar" src="{{ other_photo }}" alt="">{% else %}<div class="avatar ph" style="background-color:#ffffff">👤</div>{% endif %}
     <div class="who"><b>{{ other_name }}</b><span>About “{{ race.product }}”</span></div>
     {% if can_review %}<a class="btn small" href="{% url 'review_seller' race.id other_id %}?next=chat">⭐ Review seller</a>{% endif %}
+    <button type="button" class="btn small ghost" id="sd-open">🕵️ Check for scam</button>
     <span id="status" class="chip">Connecting…</span>
   </div>
 
@@ -57,6 +58,7 @@
     <button id="send" type="button" class="btn" disabled>Send</button>
   </div>
 </div>
+{% include "_scam_modal.html" %}
 {% endblock %}
 
 {% block scripts %}
@@ -83,6 +85,8 @@ function addMsg(m, stick){
   if (m.system){ el.className = 'sys'; el.textContent = m.text; }
   else {
     el.className = 'bub ' + (m.sender_id === ME ? 'me' : 'them');
+    el.dataset.mid = m.id;
+    el.dataset.text = m.text;
     const t = document.createElement('div'); t.textContent = m.text;
     const ts = document.createElement('div'); ts.className = 'time';
     ts.textContent = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
@@ -124,6 +128,15 @@ function grow(){ box.style.height = 'auto'; box.style.height = Math.min(box.scro
 sendBtn.onclick = sendMsg;
 box.addEventListener('input', grow);
 box.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); sendMsg(); } });
+const sdOpen = document.getElementById('sd-open');
+if (sdOpen) sdOpen.onclick = () => {
+  const last = [...document.querySelectorAll('.bub.them')].pop();
+  ScamDoctor.open({
+    source: 'private_chat',
+    messageId: last ? last.dataset.mid : null,
+    text: last ? (last.dataset.text || '') : ''
+  });
+};
 connect();
 </script>
 {% endblock %}

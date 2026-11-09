@@ -10,6 +10,7 @@ urlpatterns = [
     path("login/", auth_views.LoginView.as_view(authentication_form=LoginForm), name="login"),
     path("", include("django.contrib.auth.urls")),   # logout, password reset, etc.
     path("", include("race.urls")),
+    path("", include("scamdoctor.urls")),
 ]
 
 if settings.DEBUG:

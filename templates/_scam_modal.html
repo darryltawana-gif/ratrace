@@ -1,0 +1,180 @@
+<style>
+ .sd-modal{display:none;position:fixed;inset:0;background:rgba(11,31,75,.72);z-index:300;align-items:center;justify-content:center;padding:14px}
+ .sd-modal.show{display:flex}
+ .sd-box{background:#fff;border-radius:18px;max-width:560px;width:100%;max-height:92vh;overflow:auto;border-top:6px solid #d90429;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+ .sd-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #d9e1f1}
+ .sd-head h2{margin:0;font-size:1.12rem;flex:1}
+ .sd-x{background:none;border:0;font-size:1.6rem;line-height:1;cursor:pointer;color:#5a6a8c;padding:4px 8px}
+ .sd-body{padding:14px 18px}
+ .sd-body label{display:block;font-weight:700;margin:0 0 6px}
+ .sd-body textarea{width:100%;padding:11px 12px;border-radius:10px;border:1.5px solid #c5d0ea;font:inherit;resize:vertical;min-height:110px}
+ .sd-body textarea:focus{outline:none;border-color:#d90429;box-shadow:0 0 0 3px rgba(217,4,41,.15)}
+ .sd-lead{font-size:.88rem;color:#5a6a8c;margin:0 0 12px}
+ .sd-foot{padding:12px 18px;border-top:1px solid #d9e1f1;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+ .sd-result{margin-top:14px;border-top:1px solid #d9e1f1;padding-top:12px}
+ .sd-top{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:12px;font-weight:800;border:1px solid #d9e1f1;background:#f1f4fa;color:#5a6a8c}
+ .sd-top.risk-high{background:#fde8ec;border-color:#f1a5b4;color:#8a0f2b}
+ .sd-top.risk-medium{background:#fff4e5;border-color:#f0c78a;color:#8a4b00}
+ .sd-top.risk-low{background:#fffbe6;border-color:#e8d98a;color:#6b5600}
+ .sd-top.risk-safe{background:#e3f6ea;border-color:#9dd8b3;color:#14532d}
+ .sd-pill{font-size:.8rem}
+ .sd-score{margin-left:auto;font-size:.8rem;font-weight:700;opacity:.9}
+ .sd-summary{font-weight:600;margin:10px 0}
+ .sd-flags{margin:8px 0 0;padding-left:18px}
+ .sd-flags li{margin:6px 0;font-size:.88rem}
+ .sd-sev{display:inline-block;border-radius:999px;padding:1px 7px;font-size:.68rem;font-weight:800;margin-right:5px;border:1px solid #d9e1f1;background:#f1f4fa;color:#5a6a8c}
+ .sd-sev.high{background:#fde8ec;border-color:#f1a5b4;color:#8a0f2b}
+ .sd-sev.medium{background:#fff4e5;border-color:#f0c78a;color:#8a4b00}
+ .sd-sev.low{background:#fffbe6;border-color:#e8d98a;color:#6b5600}
+ .sd-sub{font-size:.82rem;font-weight:800;margin:12px 0 4px;color:#0b1f4b}
+ .sd-advice{margin:0;padding-left:18px}
+ .sd-advice li{margin:5px 0;font-size:.86rem}
+ .sd-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+ .sd-note{font-size:.78rem;color:#5a6a8c;margin-top:10px}
+ .sd-err{color:#b30322;font-weight:700;font-size:.9rem;margin-top:10px}
+</style>
+
+<div id="sdModal" class="sd-modal" aria-hidden="true">
+  <div class="sd-box" role="dialog" aria-modal="true" aria-labelledby="sdTitle">
+    <div class="sd-head">
+      <h2 id="sdTitle">🕵️ Scam Doctor</h2>
+      <button type="button" class="sd-x" id="sdClose" aria-label="Close">×</button>
+    </div>
+    <div class="sd-body">
+      <p class="sd-lead">Check a message before you pay or share details. The result is private to you and stored for the safety team.{% if ai_available %} The message is also sent to the configured AI provider for analysis.{% endif %}</p>
+      <label for="sdText">Message to check</label>
+      <textarea id="sdText" rows="5" maxlength="8000" placeholder="Paste the message here…"></textarea>
+      <div id="sdResult" class="sd-result" hidden></div>
+      <div id="sdErr" class="sd-err" hidden></div>
+    </div>
+    <div class="sd-foot">
+      <button type="button" class="btn ghost" id="sdCancel">Close</button>
+      <button type="button" class="btn" id="sdRun">Check for scam</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const modal = document.getElementById('sdModal');
+  const textEl = document.getElementById('sdText');
+  const resultEl = document.getElementById('sdResult');
+  const errEl = document.getElementById('sdErr');
+  const runBtn = document.getElementById('sdRun');
+  let current = { source: 'checker', messageId: null };
+
+  function show() {
+    modal.classList.add('show');
+    modal.setAttribute('aria-hidden', 'false');
+    setTimeout(() => textEl.focus(), 30);
+  }
+  function hide() {
+    modal.classList.remove('show');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+  function open(opts) {
+    opts = opts || {};
+    current = { source: opts.source || 'checker', messageId: opts.messageId || null };
+    textEl.value = opts.text || '';
+    resultEl.hidden = true;
+    resultEl.innerHTML = '';
+    errEl.hidden = true;
+    errEl.textContent = '';
+    show();
+  }
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text != null) node.textContent = text;
+    return node;
+  }
+  function render(data) {
+    resultEl.innerHTML = '';
+    resultEl.hidden = false;
+
+    const top = el('div', 'sd-top risk-' + data.risk);
+    top.appendChild(el('span', 'sd-pill', data.risk_label || data.risk));
+    top.appendChild(el('span', 'sd-score', 'Risk score ' + data.score + '/100'));
+    resultEl.appendChild(top);
+
+    resultEl.appendChild(el('p', 'sd-summary', data.summary || ''));
+
+    if (data.flags && data.flags.length) {
+      resultEl.appendChild(el('div', 'sd-sub', 'Warning signs'));
+      const ul = el('ul', 'sd-flags');
+      data.flags.forEach(f => {
+        const li = el('li');
+        li.appendChild(el('span', 'sd-sev ' + (f.severity || 'medium'),
+                          (f.severity || 'medium').charAt(0).toUpperCase() + (f.severity || 'medium').slice(1)));
+        li.appendChild(el('b', null, f.label || 'Warning sign'));
+        if (f.detail) li.appendChild(el('div', 'sd-note', f.detail));
+        ul.appendChild(li);
+      });
+      resultEl.appendChild(ul);
+    }
+
+    if (data.advice && data.advice.length) {
+      resultEl.appendChild(el('div', 'sd-sub', 'What to do'));
+      const ol = el('ol', 'sd-advice');
+      data.advice.slice(0, 5).forEach(a => ol.appendChild(el('li', null, a)));
+      resultEl.appendChild(ol);
+    }
+
+    if (data.ai_note) resultEl.appendChild(el('div', 'sd-note', data.ai_note));
+
+    const actions = el('div', 'sd-actions');
+    if (data.scan_url) {
+      const full = el('a', 'btn small navy', 'See full result');
+      full.href = data.scan_url;
+      actions.appendChild(full);
+    }
+    if (data.report_url) {
+      const report = el('a', 'btn small danger', 'Report this account');
+      report.href = data.report_url;
+      actions.appendChild(report);
+    }
+    resultEl.appendChild(actions);
+  }
+  async function run() {
+    const text = textEl.value.trim();
+    if (!text && !current.messageId) {
+      errEl.hidden = false;
+      errEl.textContent = 'Paste a message or choose a chat message to check.';
+      return;
+    }
+    errEl.hidden = true;
+    runBtn.disabled = true;
+    runBtn.textContent = 'Checking…';
+    try {
+      const res = await fetch('/scam-doctor/check/', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf()},
+        body: JSON.stringify({
+          source: current.source,
+          message_id: current.messageId,
+          text: text
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'The check could not run.');
+      render(data);
+    } catch (err) {
+      errEl.hidden = false;
+      errEl.textContent = err.message || 'The check could not run. Please try again.';
+    } finally {
+      runBtn.disabled = false;
+      runBtn.textContent = 'Check for scam';
+    }
+  }
+
+  document.getElementById('sdClose').onclick = hide;
+  document.getElementById('sdCancel').onclick = hide;
+  runBtn.onclick = run;
+  modal.addEventListener('click', e => { if (e.target === modal) hide(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && modal.classList.contains('show')) hide();
+  });
+
+  window.ScamDoctor = {open: open};
+})();
+</script>

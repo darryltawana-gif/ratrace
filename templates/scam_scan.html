@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Scam Doctor result · The Rat Race{% endblock %}
+{% block content %}
+<style>
+ .scan-head{border-radius:20px;padding:20px;border-bottom:5px solid #d90429;background:#fff;border:1px solid var(--border);box-shadow:0 2px 8px rgba(11,31,75,.08)}
+ .scan-head.risk-high{background:#fff5f7;border-color:#f3b4c0}
+ .scan-head.risk-medium{background:#fffaf2;border-color:#f0c78a}
+ .scan-head.risk-low{background:#fffdf2;border-color:#e8d98a}
+ .scan-head.risk-safe{background:#f4fcf7;border-color:#9dd8b3}
+ .scan-pill{display:inline-block;border-radius:999px;padding:4px 13px;font-size:.8rem;font-weight:800;border:1px solid #d9e1f1;background:#f1f4fa;color:#5a6a8c}
+ .scan-head.risk-high .scan-pill{background:#fde8ec;border-color:#f1a5b4;color:#8a0f2b}
+ .scan-head.risk-medium .scan-pill{background:#fff4e5;border-color:#f0c78a;color:#8a4b00}
+ .scan-head.risk-low .scan-pill{background:#fffbe6;border-color:#e8d98a;color:#6b5600}
+ .scan-head.risk-safe .scan-pill{background:#e3f6ea;border-color:#9dd8b3;color:#14532d}
+ .scan-head h1{margin:10px 0 6px;font-size:1.55rem}
+ .scan-head p{margin:0;font-weight:600}
+ .meter{height:12px;border-radius:999px;background:#e8eef9;overflow:hidden;margin:14px 0 6px}
+ .meter span{display:block;height:100%;background:linear-gradient(90deg,#16a34a,#e3ac00,#d90429)}
+ .scan-meta{font-size:.8rem;color:#5a6a8c}
+ .scan-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr);gap:16px;align-items:start;margin-top:16px}
+ @media (max-width:820px){.scan-grid{grid-template-columns:1fr}}
+ .scan-card{background:#fff;border:1px solid var(--border);border-radius:16px;padding:16px;margin:0 0 14px;box-shadow:0 1px 3px rgba(11,31,75,.08)}
+ .scan-card h2{margin:0 0 8px;font-size:1.1rem}
+ .scan-flags{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:9px}
+ .scan-flags li{border:1px solid #e3e9f5;border-radius:12px;padding:10px 12px;background:#f9fbff;font-size:.9rem}
+ .scan-flags li.high{border-color:#f3b4c0;background:#fff5f7}
+ .scan-flags li.medium{border-color:#f0c78a;background:#fffaf2}
+ .scan-flags li.low{border-color:#e8d98a;background:#fffdf2}
+ .sev{display:inline-block;border-radius:999px;padding:1px 8px;font-size:.7rem;font-weight:800;margin-right:6px;border:1px solid #d9e1f1;background:#f1f4fa;color:#5a6a8c}
+ .sev.high{background:#fde8ec;border-color:#f1a5b4;color:#8a0f2b}
+ .sev.medium{background:#fff4e5;border-color:#f0c78a;color:#8a4b00}
+ .sev.low{background:#fffbe6;border-color:#e8d98a;color:#6b5600}
+ .scan-advice{margin:0;padding-left:20px}
+ .scan-advice li{margin:7px 0;font-size:.92rem}
+ .scan-text{white-space:pre-wrap;word-wrap:break-word;background:#f7f9fe;border:1px solid #e3e9f5;border-radius:10px;padding:11px;font-size:.9rem;max-height:260px;overflow:auto;margin:0}
+ .scan-evidence img,.scan-evidence video{max-width:100%;border-radius:12px;border:1px solid #d9e1f1;display:block}
+ .scan-note{font-size:.82rem;color:#5a6a8c;background:#f7f9fe;border:1px solid #e3e9f5;border-radius:10px;padding:9px 11px;margin:10px 0}
+ .scan-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+ .scan-disclaimer{font-size:.82rem;color:#5a6a8c;border-left:4px solid #d90429;padding:8px 12px;background:#fff5f7;border-radius:8px;margin-top:14px}
+</style>
+
+<div class="scan-head risk-{{ scan.risk }}">
+  <span class="scan-pill">{{ scan.get_risk_display }}</span>
+  <h1>{% if scan.risk == 'high' %}Stop — this looks like a likely scam{% elif scan.risk == 'medium' %}Be careful — several warning signs{% elif scan.risk == 'low' %}A few caution signs{% else %}No common scam signs found{% endif %}</h1>
+  <p>{{ scan.summary }}</p>
+  <div class="meter" role="img" aria-label="Risk score {{ scan.score }} out of 100"><span style="width: {{ scan.score }}%"></span></div>
+  <div class="scan-meta">Risk score {{ scan.score }}/100 · Checked {{ scan.created|date:"d M Y, H:i" }} · Engine: {{ scan.engine }}{% if scan.ai_used %} · AI used{% endif %}</div>
+</div>
+
+<div class="scan-grid">
+  <div>
+    <div class="scan-card">
+      <h2>What Scam Doctor found</h2>
+      {% if flags %}
+        <ul class="scan-flags">
+          {% for f in flags %}
+            <li class="{{ f.severity }}">
+              <span class="sev {{ f.severity }}">{{ f.severity|capfirst }}</span><b>{{ f.label }}</b>
+              <div class="muted" style="margin-top:4px">{{ f.detail }}</div>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="muted">No specific warning pattern matched. That does not prove the person is honest — read the advice on the right.</p>
+      {% endif %}
+    </div>
+
+    <div class="scan-card">
+      <h2>What you should do</h2>
+      <ol class="scan-advice">
+        {% for a in advice %}<li>{{ a }}</li>{% endfor %}
+      </ol>
+    </div>
+
+    <div class="scan-card">
+      <h2>What was checked</h2>
+      {% if scan.text %}<pre class="scan-text">{{ scan.text }}</pre>{% endif %}
+      {% if scan.file %}
+        <div class="scan-evidence" style="margin-top:{% if scan.text %}12px{% else %}0{% endif %}">
+          {% if scan.kind == 'image' %}
+            <img src="{% url 'scamdoctor:scan_file' scan.id %}" alt="Uploaded evidence">
+          {% elif scan.kind == 'video' %}
+            <video controls preload="metadata" src="{% url 'scamdoctor:scan_file' scan.id %}"></video>
+          {% endif %}
+          {% if scan.original_name %}<div class="scan-meta" style="margin-top:6px">File: {{ scan.original_name }}</div>{% endif %}
+        </div>
+      {% endif %}
+      {% if not scan.text and not scan.file %}<p class="muted">No content was stored with this scan.</p>{% endif %}
+    </div>
+  </div>
+
+  <div>
+    <div class="scan-card">
+      <h2>Result details</h2>
+      <p style="font-size:.9rem"><b>Risk:</b> {{ scan.get_risk_display }} ({{ scan.score }}/100)</p>
+      <p style="font-size:.9rem"><b>Checked by:</b> {{ scan.engine }}</p>
+      <p style="font-size:.9rem"><b>Where:</b> {{ scan.get_source_display }}</p>
+      {% if scan.other_user %}<p style="font-size:.9rem"><b>About a message from:</b> {{ scan.other_user.username }}</p>{% endif %}
+      {% if scan.ai_note %}<div class="scan-note">{{ scan.ai_note }}</div>{% endif %}
+      {% if not ai_available and scan.kind != 'text' %}
+        <div class="scan-note">AI visual analysis is not configured on this server yet. The file has been stored for the safety team to review.</div>
+      {% endif %}
+      <div class="scan-actions">
+        <a class="btn small" href="{% url 'scamdoctor:checker' %}">Check another</a>
+        {% if report_url %}<a class="btn small danger" href="{{ report_url }}">Report this account</a>{% endif %}
+        <a class="btn small ghost" href="{% url 'chat_list' %}">My chats</a>
+      </div>
+    </div>
+
+    <div class="scan-card">
+      <h2>Remember</h2>
+      <p style="font-size:.9rem">Scam Doctor is a helper, not a guarantee. A “safe” result does not prove someone is honest, and a warning is not a public accusation.</p>
+      <p style="font-size:.9rem">Always confirm payments inside your own bank or mobile-money app, and never share your PIN, OTP or password.</p>
+      <p style="font-size:.9rem">The scan is stored so the safety team can review it. If you are in danger or have lost money, contact your bank and the police as well.</p>
+    </div>
+  </div>
+</div>
+
+<div class="scan-disclaimer">
+  If you have already sent money, call your bank or mobile-money provider immediately and report the account here. Do not send more money to “unlock” a refund.
+</div>
+{% endblock %}

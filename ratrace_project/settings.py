@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     "channels",
     "race",
+    "scamdoctor.apps.ScamDoctorConfig",
 ]
 
 MIDDLEWARE = [
@@ -102,6 +103,24 @@ TURN_URLS = [u.strip() for u in os.environ.get(
     "TURN_URLS", os.environ.get("TURN_URL", "")).split(",") if u.strip()]
 TURN_USERNAME = os.environ.get("TURN_USERNAME", "")
 TURN_CREDENTIAL = os.environ.get("TURN_CREDENTIAL", "")
+
+
+# ------------------------------- Scam Doctor -------------------------------
+# The rules engine works with no key. Set SCAM_DOCTOR_AI_API_KEY to turn on the
+# optional cloud text/vision check. The endpoint must be OpenAI-compatible.
+SCAM_DOCTOR_AI_API_KEY = os.environ.get("SCAM_DOCTOR_AI_API_KEY", "")
+SCAM_DOCTOR_AI_BASE_URL = os.environ.get(
+    "SCAM_DOCTOR_AI_BASE_URL", "https://api.openai.com/v1")
+SCAM_DOCTOR_AI_MODEL = os.environ.get("SCAM_DOCTOR_AI_MODEL", "gpt-4o-mini")
+SCAM_DOCTOR_AI_VISION_MODEL = os.environ.get("SCAM_DOCTOR_AI_VISION_MODEL", "")
+SCAM_DOCTOR_AI_TRANSCRIBE_MODEL = os.environ.get(
+    "SCAM_DOCTOR_AI_TRANSCRIBE_MODEL", "whisper-1")
+
+# Automatic chat warnings use rules only. A score at or above this is sent to
+# the recipient as a private warning; the sender is never told.
+SCAM_DOCTOR_AUTO_WARN_SCORE = int(os.environ.get("SCAM_DOCTOR_AUTO_WARN_SCORE", "35"))
+SCAM_DOCTOR_MAX_CHECKS_PER_HOUR = int(
+    os.environ.get("SCAM_DOCTOR_MAX_CHECKS_PER_HOUR", "40"))
 
 
 LOGIN_URL = "/login/"

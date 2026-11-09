@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Scam Doctor · The Rat Race{% endblock %}
+{% block content %}
+<style>
+ .sd-hero{background:linear-gradient(135deg,#0b1f4b,#16336f);color:#fff;border-radius:20px;padding:22px 20px;border-bottom:5px solid #d90429;margin-bottom:14px}
+ .sd-hero h1{color:#fff;margin:0 0 6px;font-size:1.7rem}
+ .sd-hero p{margin:0;color:#d6e0f7;max-width:720px}
+ .sd-badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:4px 12px;font-size:.78rem;font-weight:800;margin-top:12px}
+ .sd-badge.on{background:#e3f6ea;color:#14532d}
+ .sd-badge.off{background:#fff4e5;color:#8a4b00}
+ .sd-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,.75fr);gap:16px;align-items:start}
+ @media (max-width:820px){.sd-grid{grid-template-columns:1fr}}
+ .sd-card{background:#fff;border:1px solid var(--border);border-radius:16px;padding:16px;margin:0 0 14px;box-shadow:0 1px 3px rgba(11,31,75,.08)}
+ .sd-card h2{margin:0 0 8px;font-size:1.12rem}
+ .sd-card h3{margin:14px 0 6px;font-size:.98rem}
+ .sd-card p{margin:6px 0}
+ .sd-form label{display:block;font-weight:700;margin:12px 0 6px}
+ .sd-form .helptext{font-size:.82rem;color:#5a6a8c;margin-top:4px}
+ .sd-consent{display:flex;gap:10px;align-items:flex-start;background:#f7f9fe;border:1px solid #e3e9f5;border-radius:12px;padding:10px 12px;margin:12px 0}
+ .sd-consent input{width:20px;height:20px;margin-top:2px;flex:none;accent-color:#d90429}
+ .sd-consent label{margin:0;font-weight:600;font-size:.9rem}
+ .sd-types{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+ @media (max-width:560px){.sd-types{grid-template-columns:1fr}}
+ .sd-type{border:1px solid #e3e9f5;background:#f7f9fe;border-radius:12px;padding:9px 11px;font-size:.86rem}
+ .sd-type b{display:block;font-size:.88rem;color:#0b1f4b}
+ .sd-recent{display:flex;flex-direction:column;gap:8px}
+ .sd-recent a{display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;border:1px solid #e3e9f5;border-radius:12px;padding:9px 11px;background:#fff}
+ .sd-recent a:hover{border-color:#b9c7e6;background:#f7f9fe}
+ .sd-recent .what{flex:1;min-width:0;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .sd-recent .when{font-size:.75rem;color:#5a6a8c}
+ .sd-risk{display:inline-block;border-radius:999px;padding:2px 9px;font-size:.72rem;font-weight:800;border:1px solid #d9e1f1;background:#f1f4fa;color:#5a6a8c;white-space:nowrap}
+ .sd-risk.high{background:#fde8ec;border-color:#f1a5b4;color:#8a0f2b}
+ .sd-risk.medium{background:#fff4e5;border-color:#f0c78a;color:#8a4b00}
+ .sd-risk.low{background:#fffbe6;border-color:#e8d98a;color:#6b5600}
+ .sd-risk.safe{background:#e3f6ea;border-color:#9dd8b3;color:#14532d}
+ .sd-note{font-size:.82rem;color:#5a6a8c;background:#f7f9fe;border:1px solid #e3e9f5;border-radius:10px;padding:9px 11px;margin:10px 0}
+ .sd-steps{margin:0;padding-left:20px}
+ .sd-steps li{margin:6px 0;font-size:.9rem}
+ .sd-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+</style>
+
+<div class="sd-hero">
+  <h1>🕵️ Scam Doctor</h1>
+  <p>Check a message, screenshot or video before you pay, share a code or send goods.
+     Scam Doctor explains the warning signs in plain language and tells you what to do next.</p>
+  {% if ai_available %}
+    <span class="sd-badge on">● Rules + AI checks are active</span>
+  {% else %}
+    <span class="sd-badge off">● Rules checks are active · AI visual analysis is not configured yet</span>
+  {% endif %}
+</div>
+
+<div class="sd-grid">
+  <div>
+    <div class="sd-card">
+      <h2>What do you want to check?</h2>
+      <form method="post" enctype="multipart/form-data" class="sd-form" novalidate>
+        {% csrf_token %}
+        {% if form.non_field_errors %}<div class="msg error">{{ form.non_field_errors }}</div>{% endif %}
+
+        <label for="{{ form.text.id_for_label }}">{{ form.text.label }}</label>
+        {{ form.text }}
+        {% if form.text.errors %}<div class="err">{{ form.text.errors }}</div>{% endif %}
+        <p class="helptext">English, Twi and Ghanaian Pidgin are supported. You can paste a chat message, a payment alert or a link.</p>
+
+        <label for="{{ form.image.id_for_label }}">{{ form.image.label }}</label>
+        {{ form.image }}
+        {% if form.image.errors %}<div class="err">{{ form.image.errors }}</div>{% endif %}
+        <p class="helptext">Screenshots of payment alerts, receipts and chats are welcome. Max 12 MB.</p>
+
+        <label for="{{ form.video.id_for_label }}">{{ form.video.label }}</label>
+        {{ form.video }}
+        {% if form.video.errors %}<div class="err">{{ form.video.errors }}</div>{% endif %}
+        <p class="helptext">A short phone video or screen recording. Max 80 MB. Video analysis needs the AI key and ffmpeg on the server; otherwise it is stored for the safety team to review.</p>
+
+        <div class="sd-consent">
+          {{ form.consent }}
+          <label for="{{ form.consent.id_for_label }}">{{ form.consent.label }}
+            <span class="helptext" style="display:block;font-weight:500">
+              We store the text or file and the result so the safety team can review it and improve Scam Doctor. Do not upload anything you are not comfortable sharing with the safety team.{% if ai_available %} When AI checks are enabled, the text, image or video frames you submit are also sent to the configured AI provider for analysis.{% endif %}
+            </span>
+          </label>
+        </div>
+        {% if form.consent.errors %}<div class="err">{{ form.consent.errors }}</div>{% endif %}
+
+        <div class="sd-actions">
+          <button class="btn" type="submit">🕵️ Check now</button>
+          <a class="btn ghost" href="{% url 'home' %}">Cancel</a>
+        </div>
+      </form>
+    </div>
+
+    <div class="sd-card">
+      <h2>What Scam Doctor looks for</h2>
+      <div class="sd-types">
+        <div class="sd-type"><b>Fake payment screenshots</b>Forged mobile-money or bank alerts, “I have paid”, overpayment claims.</div>
+        <div class="sd-type"><b>Advance-fee / overpayment</b>Pay a fee, refund the difference, customs or delivery fee, prize tax.</div>
+        <div class="sd-type"><b>Phishing &amp; impersonation</b>Fake login links, fake delivery links, someone pretending to be a bank or seller.</div>
+        <div class="sd-type"><b>Romance / relationship</b>Building trust quickly, then asking for money, airtime or gifts.</div>
+        <div class="sd-type"><b>Fake jobs / investment</b>Pay-to-work, guaranteed returns, crypto or doubling-money offers.</div>
+        <div class="sd-type"><b>Fake delivery / courier</b>Fake parcel tracking, customs clearance, courier payment requests.</div>
+      </div>
+    </div>
+
+    <div class="sd-card">
+      <h2>How it works</h2>
+      <ol class="sd-steps">
+        <li><b>Rules first.</b> Links, payment claims, urgency, secrecy, Twi and Pidgin phrases are checked instantly and free.</li>
+        <li><b>AI second.</b> When the safety team has configured a key, a text/vision model reads the message or screenshot for a second opinion. That content is sent to the configured AI provider only when AI is on.</li>
+        <li><b>You decide.</b> You get a risk level, the exact warning signs and practical advice. Scam Doctor never publicly accuses anyone.</li>
+        <li><b>Safety team review.</b> The scan is stored in the database so the creators can review it and improve the protection.</li>
+      </ol>
+      <div class="sd-note">Scam Doctor cannot see the live Quality Proof video. It only checks what you paste or upload. A “safe” result is not a guarantee — always verify payments in your own bank or mobile-money app.</div>
+    </div>
+  </div>
+
+  <div>
+    <div class="sd-card">
+      <h2>Your recent checks</h2>
+      <div class="sd-recent">
+        {% for s in recent %}
+          <a href="{% url 'scamdoctor:scan_detail' s.id %}">
+            <span class="sd-risk {{ s.risk }}">{{ s.get_risk_display }}</span>
+            <span class="what">{{ s.summary|default:s.text|truncatechars:70 }}</span>
+            <span class="when">{{ s.created|date:"d M, H:i" }}</span>
+          </a>
+        {% empty %}
+          <p class="muted" style="font-size:.9rem">No checks yet. Paste a message or upload a screenshot to start.</p>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="sd-card">
+      <h2>Before you pay</h2>
+      <p style="font-size:.9rem">✅ Confirm the money inside your own bank or mobile-money app.</p>
+      <p style="font-size:.9rem">✅ Never share your PIN, OTP, password, card number or mobile-money details.</p>
+      <p style="font-size:.9rem">✅ Keep the chat and evidence on The Rat Race.</p>
+      <p style="font-size:.9rem">✅ If pressure continues, report the account to the safety team.</p>
+      <a class="btn small navy" href="{% url 'comments' %}">Ask the community</a>
+    </div>
+
+    <div class="sd-card">
+      <h2>Need to report someone?</h2>
+      <p style="font-size:.9rem">Open the seller's profile and tap <b>Report</b>. Include the chat or payment evidence so the safety team can act.</p>
+      <a class="btn small danger" href="{% url 'chat_list' %}">Go to my chats</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
