@@ -153,7 +153,17 @@
     <p class="tagline">The Customer is the King. Sellers compete to satisfy the Customer.</p>
     <div class="hero-actions{% if user.is_authenticated %} tight{% endif %}">
       {% if user.is_authenticated %}
+        {% if active_race %}
+          {% if active_race.status == 'open' %}
+        <a class="btn" href="{% url 'race_room' active_race.id %}" style="font-size:1.08rem;padding:12px 24px">🔙 Back to Race</a>
+          {% else %}
+        <form method="post" action="{% url 'customer_reopen' active_race.id %}" style="margin:0">{% csrf_token %}
+          <button class="btn" style="font-size:1.08rem;padding:12px 24px">🔙 Back to Race</button>
+        </form>
+          {% endif %}
+        {% else %}
         <a class="btn" href="{% url 'start' %}" style="font-size:1.08rem;padding:12px 24px">🛒 Start a Race</a>
+        {% endif %}
         <a class="live-pill" href="#live-races"><span class="dot"></span><span id="liveCount">{{ live_count }}</span> live<span class="live-word"> race{{ live_count|pluralize }}</span></a>
       {% else %}
         <a class="btn" href="{% url 'signup' %}" style="font-size:1.08rem;padding:12px 24px">Create free account</a>

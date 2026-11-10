@@ -53,6 +53,35 @@ class HomePageTests(TestCase):
         self.assertContains(response, "Start a Race")
         self.assertNotContains(response, "Recent activities")
 
+    def test_customer_home_links_back_to_active_race(self):
+        race = Race.objects.create(customer=self.customer, product="Sneakers", budget=100)
+        self.client.force_login(self.customer)
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Back to Race")
+        self.assertContains(response, f'href="/race/{race.id}/"')
+        self.assertNotContains(response, "Start a Race")
+
+    def test_customer_home_links_back_to_reopenable_race(self):
+        race = Race.objects.create(customer=self.customer, product="Sneakers", budget=100, status="closed")
+        self.client.force_login(self.customer)
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Back to Race")
+        self.assertContains(response, f'action="/race/{race.id}/reopen/"')
+        self.assertNotContains(response, "Start a Race")
+
+    def test_customer_home_offers_new_race_when_last_one_expired(self):
+        Race.objects.create(
+            customer=self.customer, product="Sneakers", budget=100, status="closed",
+            expires_at=timezone.now() - timedelta(minutes=1),
+        )
+        self.client.force_login(self.customer)
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Start a Race")
+        self.assertNotContains(response, "Back to Race")
+
     def test_seller_home_shows_profile_then_posts(self):
         self.client.force_login(self.seller)
         response = self.client.get("/")

@@ -22,8 +22,9 @@
  .overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(11,31,75,.9);z-index:100;align-items:center;justify-content:center;padding:20px;text-align:center}
  .overbox{max-width:480px;background:#fff;border-top:6px solid #d90429;border-radius:20px;padding:28px}
  .overbox h1{font-size:2.3rem;margin:0 0 8px}
- #qlocalwrap{position:absolute;right:10px;bottom:10px;width:34%;border:2px solid #fff;border-radius:10px;overflow:hidden;background:#000}
- #qlocal{width:100%;display:block}
+ #qmodal .modal-box{max-width:920px}
+ #qmodal .video-wrap{aspect-ratio:16/9}
+ #qremote{width:100%;height:100%;object-fit:contain;background:#050f2a;display:block}
  @media (max-width:700px){.body{grid-template-columns:1fr}}
 </style>
 
@@ -110,7 +111,7 @@
 {% endif %}
 
 <div id="qmodal" class="modal">
-  <div class="modal-box" style="max-width:640px">
+  <div class="modal-box" style="max-width:920px">
     <div class="modal-head">
       <h2>🎥 Quality Proof</h2>
       <span id="qcount" class="chip">48:00</span>
@@ -118,8 +119,7 @@
     </div>
     <div class="modal-body">
       <div class="video-wrap">
-        <video id="qremote" autoplay playsinline></video>
-        <div id="qlocalwrap"><video id="qlocal" autoplay playsinline muted></video></div>
+        <video id="qremote" autoplay playsinline muted></video>
         <div id="qstatus" class="video-note">Connecting…</div>
       </div>
       <p class="msg-note">Live video only — up to 48 minutes, and nothing is recorded.</p>
@@ -445,8 +445,10 @@ async function getCamera(){
 async function startCamera(){
   if (localStream) localStream.getTracks().forEach(t => t.stop());
   localStream = await getCamera();
-  const local = document.getElementById('qlocal');
-  if (local) { local.srcObject = localStream; local.play().catch(() => {}); }
+  // The seller previews their own camera in the single large video; there is
+  // no small picture-in-picture box covering the view.
+  const view = document.getElementById('qremote');
+  if (view) { view.srcObject = localStream; view.play().catch(() => {}); }
 }
 
 async function openQuality(){
@@ -559,6 +561,9 @@ function makePC(){
   pc = new RTCPeerConnection(ICE);
   pc.onicecandidate = e => { if (e.candidate) qsend({ kind: 'ice', data: e.candidate }); };
   pc.ontrack = e => {
+    // The customer watches the seller in the large video. The seller keeps
+    // their own camera preview there instead of a second small overlay.
+    if (!IS_OWNER) return;
     const remote = document.getElementById('qremote');
     if (remote) { remote.srcObject = e.streams[0]; remote.play().catch(() => {}); }
   };
@@ -672,7 +677,6 @@ function closeQualitySilently(){
 function hideQuality(){
   const m = document.getElementById('qmodal'); if (m) m.classList.remove('show');
   const r = document.getElementById('qremote'); if (r) r.srcObject = null;
-  const l = document.getElementById('qlocal'); if (l) l.srcObject = null;
 }
 </script>
 {% endblock %}

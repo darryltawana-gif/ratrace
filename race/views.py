@@ -50,12 +50,24 @@ def home(request):
     seller_circles = []
     seller_posts = []
     deals = []
+    active_race = None
     if request.user.is_authenticated:
         profile = sv.get_profile(request.user)
         if profile.role == "customer":
             circle = sv.ensure_circle(request.user)
             circle_members = [sv.circle_member_dict(m) for m in circle.accepted_members()]
             circle_pending = circle.members.filter(status="pending").count()
+            # If the customer already has a live race, the home button should
+            # take them back into it instead of offering to start another.
+            active_race = Race.objects.filter(
+                customer=request.user, status="open", expires_at__gt=timezone.now()
+            ).first()
+            if not active_race:
+                # Leaving the room closes the race but keeps it reopenable
+                # until it expires; "Back to Race" should still return to it.
+                active_race = Race.objects.filter(
+                    customer=request.user, status="closed", expires_at__gt=timezone.now()
+                ).order_by("-started_at").first()
         elif profile.role == "seller":
             seller_circles = sv.circle_for_seller(request.user)
             circle_pending = sv.pending_requests(request.user).count()
@@ -68,7 +80,7 @@ def home(request):
         "circle": circle, "circle_members": circle_members,
         "circle_pending": circle_pending, "seller_circles": seller_circles,
         "seller_posts": seller_posts, "deals": deals, "my_profile": profile,
-        "live_count": sv.live_races().count(),
+        "live_count": sv.live_races().count(), "active_race": active_race,
     })
 
 
