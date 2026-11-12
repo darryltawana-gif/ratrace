@@ -89,7 +89,6 @@
       <h4>{{ p.title }}</h4>
       {% if p.price %}<b style="color:#16a34a">{{ p.price }}</b>{% endif %}
       <span class="muted" style="font-size:.86rem">{{ p.description|truncatechars:120 }}</span>
-      {% if p.image or p.video %}{% if not p.media_verified %}<span class="tag unverified" style="align-self:flex-start">Unverified media</span>{% endif %}{% endif %}
     </div>
   </div>
   {% endfor %}

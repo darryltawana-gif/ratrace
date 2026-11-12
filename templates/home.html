@@ -98,7 +98,6 @@
     {% else %}<div class="avatar ph">🎬</div>{% endif %}
     <span class="nm">{{ p.title }}</span>
     {% if p.price %}<span class="cat">{{ p.price }}</span>{% endif %}
-    {% if p.image or p.video %}{% if not p.media_verified %}<span class="wins">Unverified media</span>{% endif %}{% endif %}
   </a>
   {% endfor %}
 </div>

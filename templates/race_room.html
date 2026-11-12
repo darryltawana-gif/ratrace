@@ -262,7 +262,6 @@ function render(s){
         ${otherSeller ? `<a class="chip seller-profile" href="${profileUrl}" target="_blank" rel="noopener">👤 View profile</a>` : ''}
         ${mine ? presenceChip(p.id) : ''}
         ${won ? '<span class="chip win">🏆 Winner</span>' : ''}
-        ${!p.media_verified ? '<span class="tag unverified">Unverified media</span>' : ''}
       </div>
       <div class="body">
         <div>
