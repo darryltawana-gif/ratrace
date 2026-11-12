@@ -18,9 +18,10 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.cache import cache_control
 from django.views.decorators.http import require_POST
 
-from .forms import (RaceForm, JoinForm, ProfileForm, CommentForm, SignupForm,
-                    PostForm, CircleMessageForm, ReviewForm, ReportForm)
-from .models import (Race, Participant, Profile, Post, Circle, CircleMember,
+from .forms import (RaceForm, RaceItemFormSet, JoinForm, ProfileForm,
+                    CommentForm, SignupForm, PostForm, CircleMessageForm,
+                    ReviewForm, ReportForm)
+from .models import (Race, RaceItem, Participant, Profile, Post, Circle, CircleMember,
                      CircleMessage, Review, Report, Comment, ChatRoom,
                      PushSubscription, CIRCLE_TOPICS, CIRCLE_REACTIONS,
                      CATEGORY_LABELS, RACE_MINUTES)
@@ -49,6 +50,7 @@ def home(request):
     circle_pending = 0
     seller_circles = []
     seller_posts = []
+    seller_active_races = []
     deals = []
     active_race = None
     if request.user.is_authenticated:
@@ -73,6 +75,12 @@ def home(request):
             circle_pending = sv.pending_requests(request.user).count()
             seller_posts = sv.seller_posts(request.user)[:8]
             deals = sv.recent_deals(request.user)
+            # A seller may be competing in several live races at once. Show
+            # every one of them so they can jump straight back in.
+            seller_active_races = (Race.objects.filter(
+                participants__seller=request.user, participants__active=True,
+                status="open", expires_at__gt=timezone.now())
+                .select_related("customer").distinct().order_by("-started_at"))
 
     hall = [p for p in sellers if p.hall_of_fame]
     return render(request, "home.html", {
@@ -80,6 +88,7 @@ def home(request):
         "circle": circle, "circle_members": circle_members,
         "circle_pending": circle_pending, "seller_circles": seller_circles,
         "seller_posts": seller_posts, "deals": deals, "my_profile": profile,
+        "seller_active_races": seller_active_races,
         "live_count": sv.live_races().count(), "active_race": active_race,
     })
 
@@ -174,17 +183,50 @@ def customer_start(request):
     if existing:
         return redirect("race_room", existing.id)
     form = RaceForm(request.POST or None)
-    if request.method == "POST" and form.is_valid():
-        race = form.save(commit=False)
-        race.customer = request.user
-        race.save()
-        sv.broadcast("lobby", {"type": "race_started", "race": sv.lobby_race(race),
-                               "message": f"🟢 A customer started a new race: {race.product} (budget {race.budget})"})
-        sv.push_race_started(race)          # phones get alerted even when the site is closed
-        return redirect("race_room", race.id)
+    draft = Race(customer=request.user, product="", budget=0)
+    formset = RaceItemFormSet(request.POST or None, instance=draft,
+                              prefix="items")
+    if request.method == "POST" and form.is_valid() and formset.is_valid():
+        items = []
+        for f in formset.forms:
+            if not getattr(f, "cleaned_data", None):
+                continue
+            if f.cleaned_data.get("DELETE"):
+                continue
+            if f.cleaned_data.get("product"):
+                items.append(f.cleaned_data)
+        if not items:
+            form.add_error(None, "Add at least one product or service you want.")
+        else:
+            with transaction.atomic():
+                first = items[0]
+                race = Race.objects.create(
+                    customer=request.user,
+                    product=first["product"][:200],
+                    budget=first["budget"],
+                    location=form.cleaned_data["location"],
+                    customer_lat=form.cleaned_data.get("latitude"),
+                    customer_lng=form.cleaned_data.get("longitude"),
+                )
+                for position, data in enumerate(items, start=1):
+                    RaceItem.objects.create(
+                        race=race, position=position, product=data["product"][:200],
+                        budget=data["budget"], quantity=data.get("quantity") or 1,
+                        details=(data.get("details") or "")[:1000])
+            count = len(items)
+            first_product = items[0]["product"]
+            label = first_product if count == 1 else f"{first_product} + {count - 1} more"
+            total_budget = sum(item["budget"] for item in items)
+            budget_label = total_budget if count > 1 else items[0]["budget"]
+            sv.broadcast("lobby", {
+                "type": "race_started", "race": sv.lobby_race(race),
+                "message": f"🟢 A customer started a new race: {label} (budget {budget_label})"})
+            sv.push_race_started(race)          # phones get alerted even when the site is closed
+            return redirect("race_room", race.id)
     reopenable = Race.objects.filter(customer=request.user, status="closed", expires_at__gt=timezone.now())
-    return render(request, "customer_start.html", {"form": form, "reopenable": reopenable,
-                                                    "minutes": RACE_MINUTES})
+    return render(request, "customer_start.html", {
+        "form": form, "formset": formset, "reopenable": reopenable,
+        "minutes": RACE_MINUTES})
 
 
 @login_required
@@ -196,43 +238,70 @@ def race_room(request, race_id):
     if profile.role == "customer" and not is_owner:
         messages.error(request, "Customers can only open their own race.")
         return redirect("home")
-    mine = race.participants.filter(seller=request.user, active=True).first()
+    items = list(race.items.all())
+    my_offers = list(race.participants.filter(seller=request.user, active=True)
+                     .select_related("item"))
+    my_item_ids = {p.item_id for p in my_offers if p.item_id}
+    available_items = [i for i in items if i.id not in my_item_ids]
+    mine = my_offers[0] if my_offers else None
+    can_join = (not is_owner and race.is_live and profile.role in ("seller", "none")
+                and ((available_items if items else not my_offers)))
     form = None
-    if not is_owner and not mine and race.is_live and profile.role in ("seller", "none"):
+    if can_join:
         needs_photo = not profile.photo
-        form = JoinForm(request.POST or None, request.FILES or None, needs_photo=needs_photo)
+        form = JoinForm(request.POST or None, request.FILES or None,
+                        needs_photo=needs_photo, race=race,
+                        items=available_items if items else None)
         if request.method == "POST" and form.is_valid():
-            if not ensure_role(request, "seller"):
+            chosen_item = form.cleaned_data.get("item")
+            if chosen_item is None:
+                # With one product left we fill it in automatically; with
+                # several the seller must say which product they answer.
+                choices = available_items if items else []
+                if len(choices) == 1:
+                    chosen_item = choices[0]
+                elif items:
+                    form.add_error("item", "Choose which product your offer is for.")
+            if form.errors:
+                pass
+            elif not ensure_role(request, "seller"):
                 return redirect("home")
-            with transaction.atomic():
-                locked = Race.objects.select_for_update().get(pk=race.pk)
-                if locked.participants.filter(seller=request.user, active=True).exists():
-                    messages.info(request, "You are already in this race.")
-                    return redirect("race_room", race.id)
-                if not locked.is_live:
-                    messages.error(request, "This race has already ended.")
-                    return redirect("race_room", race.id)
-                slot = sv.next_slot(locked)
-                if slot is None:
-                    messages.error(request, "Race is full (10 sellers).")
-                    return redirect("race_room", race.id)
-                if needs_photo:
-                    photo = form.cleaned_data.get("profile_photo")
-                    if photo:
-                        prof = sv.get_profile(request.user)
-                        prof.photo = photo
-                        prof.save(update_fields=["photo"])
-                p = form.save(commit=False)
-                p.race, p.seller, p.slot = locked, request.user, slot
-                p.display_name = request.user.username
-                p.product_name = locked.product
-                p.media_verified = form.media_verified
-                p.save()
-            sv.broadcast(f"race_{race.id}", {"type": "state", "state": sv.race_state(race.id)})
-            sv.broadcast(f"race_{race.id}", {"type": "event",
-                                             "message": f"{p.display_name} entered the race"})
-            sv.broadcast("lobby", {"type": "slots_changed", "silent": True})
-            return redirect("race_room", race.id)
+            else:
+                with transaction.atomic():
+                    locked = Race.objects.select_for_update().get(pk=race.pk)
+                    already = locked.participants.filter(seller=request.user, active=True)
+                    if chosen_item is not None:
+                        already = already.filter(item=chosen_item)
+                    if already.exists():
+                        messages.info(request, "You are already offering that product in this race.")
+                        return redirect("race_room", race.id)
+                    if not locked.is_live:
+                        messages.error(request, "This race has already ended.")
+                        return redirect("race_room", race.id)
+                    slot = sv.next_slot(locked)
+                    if slot is None:
+                        messages.error(request, "Race is full (10 sellers).")
+                        return redirect("race_room", race.id)
+                    if needs_photo:
+                        photo = form.cleaned_data.get("profile_photo")
+                        if photo:
+                            prof = sv.get_profile(request.user)
+                            prof.photo = photo
+                            prof.save(update_fields=["photo"])
+                    p = form.save(commit=False)
+                    p.race, p.seller, p.slot = locked, request.user, slot
+                    p.item = chosen_item
+                    p.display_name = request.user.username
+                    p.product_name = ((chosen_item.product if chosen_item else locked.product)
+                                      or "")[:120]
+                    p.media_verified = form.media_verified
+                    p.save()
+                sv.broadcast(f"race_{race.id}", {"type": "state", "state": sv.race_state(race.id)})
+                offer_label = f" for {p.product_name}" if chosen_item is not None else ""
+                sv.broadcast(f"race_{race.id}", {"type": "event",
+                                                 "message": f"{p.display_name} entered the race{offer_label}"})
+                sv.broadcast("lobby", {"type": "slots_changed", "silent": True})
+                return redirect("race_room", race.id)
 
     chat_url = ""
     if race.status == "won" and race.winner and (is_owner or race.winner.seller_id == request.user.id):
@@ -252,6 +321,9 @@ def race_room(request, race_id):
         "end_message": sv.end_message(race) if race.status != "open" else "",
         "quality_seconds": sv.QUALITY_SECONDS,
         "ice_servers": sv.ice_servers(),
+        "items": items, "available_items": available_items, "can_join": can_join,
+        "customer_lat": race.customer_lat, "customer_lng": race.customer_lng,
+        "my_offers": my_offers,
     })
 
 
@@ -262,6 +334,8 @@ def customer_exit(request, race_id):
     if race.status == "open":
         race.status = "closed"
         race.save()
+        # Stop sharing the customer's live position once they leave the room.
+        sv.clear_location(request.user, race.id)
         sv.end_quality_for_race(race.id)
         sv.broadcast(f"race_{race.id}", {"type": "quality_over"})
         sv.broadcast(f"race_{race.id}", {"type": "race_over", "message": "🚪 The customer closed the race. GAME OVER."})

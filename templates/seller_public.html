@@ -68,6 +68,24 @@
     </div>
   </div>
 
+  {% if seller.shop_name or seller.shop_location %}
+  <div class="shop-card">
+    {% if seller.shop_photo %}<img class="shop-photo" src="{{ seller.shop_photo.url }}" alt="{{ seller.shop_name }}">
+    {% else %}<div class="avatar ph shop-photo" style="font-size:1.6rem">🏪</div>{% endif %}
+    <div class="sc-body">
+      <b>{{ seller.shop_name|default:"Shop" }}</b>
+      <span>📍 {{ seller.shop_location|default:"Location shared live during a race" }}</span>
+    </div>
+    {% if seller.shop_lat is not None and seller.shop_lng is not None %}
+    <a class="btn small navy" target="_blank" rel="noopener"
+       href="https://www.openstreetmap.org/directions?from=&to={{ seller.shop_lat }}%2C{{ seller.shop_lng }}">🧭 Directions</a>
+    {% elif seller.shop_location %}
+    <a class="btn small navy" target="_blank" rel="noopener"
+       href="https://www.openstreetmap.org/search?query={{ seller.shop_location|urlencode }}">🧭 Find shop</a>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <div class="review-summary">
     <div class="rs-head"><b>⭐ What customers say</b></div>
     {% with badges=seller.review_badges %}

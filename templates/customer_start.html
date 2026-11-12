@@ -1,16 +1,189 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="card narrow">
-  <h2>🏁 Start a race</h2>
-  <p class="muted">Tell sellers what you want. Every seller online is alerted instantly. Your race lasts {{ minutes }} minutes.</p>
-  <form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn" style="width:100%;margin-top:8px">Start Race</button></form>
+<style>
+ .start-wrap{max-width:680px;margin:22px auto}
+ .start-hero{background:linear-gradient(135deg,#0b1f4b,#1d3a78 60%,#0b1f4b);color:#fff;border-radius:22px;
+   padding:24px 22px;border-bottom:5px solid #f2c200;margin-bottom:16px}
+ .start-hero h2{margin:0;color:#fff;font-size:1.8rem}
+ .start-hero p{color:#d7e2fb;margin:.5em 0 0;max-width:52ch}
+ .item-row{background:#f8faff;border:1px solid #dde5f4;border-radius:16px;padding:14px;margin:12px 0;position:relative}
+ .item-row .row-top{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+ .item-row .row-top b{font-size:.9rem;color:#33456b}
+ .item-row .remove{margin-left:auto;background:#fff;border:1px solid #f0b6c1;color:#b30322;border-radius:999px;
+   padding:4px 11px;font-size:.8rem;font-weight:800;cursor:pointer}
+ .item-grid{display:grid;grid-template-columns:1.6fr .8fr .5fr;gap:10px}
+ .item-grid .details{grid-column:1/-1}
+ @media (max-width:560px){.item-grid{grid-template-columns:1fr 1fr}.item-grid .qty{grid-column:1/-1}}
+ .loc-box{background:#f8faff;border:1px dashed #c9d5ec;border-radius:16px;padding:14px;margin:14px 0}
+ .loc-box .row{margin-top:4px}
+ #locStatus{font-size:.85rem;color:#5a6a8c;margin:6px 0 0}
+ .start-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+ .start-actions .btn{flex:1 1 180px}
+ .reopen-list .row{justify-content:space-between;border-bottom:1px dashed #e3e9f5;padding:8px 0}
+ .reopen-list .row:last-child{border-bottom:0}
+</style>
+
+<div class="start-wrap">
+  <div class="start-hero">
+    <h2>🏁 Start a race</h2>
+    <p>Tell sellers everything you want in one race. Add as many products as you like — each one has its own
+      budget and details, and sellers answer the product they can supply.</p>
+  </div>
+
+  <div class="card">
+    <form method="post" id="raceStartForm" novalidate>
+      {% csrf_token %}
+      {{ form.non_field_errors }}
+      {{ formset.management_form }}
+
+      <div class="loc-box">
+        <label for="{{ form.location.id_for_label }}" style="margin-top:0">{{ form.location.label }}</label>
+        {{ form.location }}
+        {% for e in form.location.errors %}<div class="err">{{ e }}</div>{% endfor %}
+        {{ form.latitude }}{{ form.longitude }}
+        <div class="row">
+          <button type="button" class="btn small ghost" id="useMyLocation">📍 Use my current location</button>
+          <span class="muted" style="font-size:.82rem">Live distance on the race map needs this pin.</span>
+        </div>
+        <p id="locStatus" aria-live="polite"></p>
+      </div>
+
+      <div id="itemRows">
+        {% for f in formset %}
+        <div class="item-row">
+          <div class="row-top"><b>Product {{ forloop.counter }}</b>
+            <button type="button" class="remove" data-remove hidden>Remove</button>
+          </div>
+          {{ f.id }}
+          <div class="item-grid">
+            <div>
+              <label for="{{ f.product.id_for_label }}">Product or service</label>
+              {{ f.product }}
+              {% for e in f.product.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+            <div>
+              <label for="{{ f.budget.id_for_label }}">Budget</label>
+              {{ f.budget }}
+              {% for e in f.budget.errors %}<div class="err">{{ e }}</div>{% endfor %}
+            </div>
+            <div class="qty">
+              <label for="{{ f.quantity.id_for_label }}">How many?</label>
+              {{ f.quantity }}
+            </div>
+            <div class="details">
+              <label for="{{ f.details.id_for_label }}">Details (optional)</label>
+              {{ f.details }}
+            </div>
+          </div>
+          <div style="display:none">{{ f.DELETE }}</div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <template id="emptyRow">
+        <div class="item-row">
+          <div class="row-top"><b>Product __num__</b>
+            <button type="button" class="remove" data-remove>Remove</button>
+          </div>
+          <div class="item-grid">
+            <div><label>Product or service</label>{{ formset.empty_form.product }}</div>
+            <div><label>Budget</label>{{ formset.empty_form.budget }}</div>
+            <div class="qty"><label>How many?</label>{{ formset.empty_form.quantity }}</div>
+            <div class="details"><label>Details (optional)</label>{{ formset.empty_form.details }}</div>
+          </div>
+          <div style="display:none">{{ formset.empty_form.DELETE }}</div>
+        </div>
+      </template>
+
+      <div class="start-actions">
+        <button type="button" class="btn ghost" id="addItem">➕ Add another product</button>
+        <button class="btn" type="submit">🚀 Start Race</button>
+      </div>
+      <p class="msg-note">Your race lasts {{ minutes }} minutes. Every seller online is alerted instantly.</p>
+    </form>
+  </div>
+
+  {% if reopenable %}
+  <div class="card reopen-list">
+    <h3 style="margin-top:0">Re-enter a race you left</h3>
+    {% for r in reopenable %}
+    <form method="post" action="{% url 'customer_reopen' r.id %}" class="row">{% csrf_token %}
+      <span>{{ r.product }}</span>
+      <button class="btn small green">Re-enter</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
 </div>
-{% if reopenable %}
-<div class="card narrow"><h3>Re-enter a race you left</h3>
-  {% for r in reopenable %}
-  <form method="post" action="{% url 'customer_reopen' r.id %}" class="row">{% csrf_token %}
-    <span>{{ r.product }}</span> <button class="btn small green">Re-enter</button></form>
-  {% endfor %}
-</div>
-{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  const rows = document.getElementById('itemRows');
+  const total = document.getElementById('id_items-TOTAL_FORMS');
+  const empty = document.getElementById('emptyRow');
+  const addBtn = document.getElementById('addItem');
+  const minRows = 1;
+
+  function renumber(){
+    const list = [...rows.querySelectorAll('.item-row')];
+    list.forEach((row, i) => {
+      const label = row.querySelector('.row-top b');
+      if (label) label.textContent = 'Product ' + (i + 1);
+      const remove = row.querySelector('[data-remove]');
+      if (remove) remove.hidden = list.length <= minRows;
+    });
+    if (total) total.value = list.length;
+  }
+
+  function bindRemove(row){
+    const btn = row.querySelector('[data-remove]');
+    if (!btn) return;
+    btn.onclick = () => {
+      if (rows.querySelectorAll('.item-row').length <= minRows) return;
+      const del = row.querySelector('input[type=checkbox][name$="-DELETE"]');
+      if (del) { del.checked = true; row.style.display = 'none'; }
+      else row.remove();
+      renumber();
+    };
+  }
+
+  function addRow(){
+    const html = empty.innerHTML.replace(/__prefix__/g, String(rows.querySelectorAll('.item-row').length));
+    const wrap = document.createElement('div');
+    wrap.innerHTML = html.trim();
+    const row = wrap.firstElementChild;
+    rows.appendChild(row);
+    bindRemove(row);
+    renumber();
+    const input = row.querySelector('input[name$="-product"]');
+    if (input) input.focus();
+  }
+
+  rows.querySelectorAll('.item-row').forEach(bindRemove);
+  addBtn.onclick = addRow;
+  renumber();
+
+  const loc = document.getElementById('id_location');
+  const lat = document.getElementById('id_latitude');
+  const lng = document.getElementById('id_longitude');
+  const status = document.getElementById('locStatus');
+  document.getElementById('useMyLocation').onclick = () => {
+    if (!navigator.geolocation) { status.textContent = 'This browser cannot share your location.'; return; }
+    status.textContent = 'Finding your location…';
+    navigator.geolocation.getCurrentPosition(pos => {
+      const c = pos.coords;
+      if (lat) lat.value = c.latitude.toFixed(6);
+      if (lng) lng.value = c.longitude.toFixed(6);
+      if (loc && !loc.value.trim()) loc.value = 'My current location';
+      status.textContent = `📍 Location saved (${c.latitude.toFixed(4)}, ${c.longitude.toFixed(4)}).`;
+    }, err => {
+      status.textContent = err.code === 1
+        ? 'Location permission was blocked. Type your area above instead.'
+        : 'Could not get your location. Type your area above instead.';
+    }, {enableHighAccuracy: true, timeout: 12000, maximumAge: 30000});
+  };
+})();
+</script>
 {% endblock %}

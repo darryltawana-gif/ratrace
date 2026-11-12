@@ -3,9 +3,10 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.forms import inlineformset_factory
 
-from .models import (Race, Participant, Profile, Post, Comment, CircleMessage,
-                     CIRCLE_TOPICS, CATEGORIES)
+from .models import (Race, RaceItem, Participant, Profile, Post, Comment,
+                     CircleMessage, CIRCLE_TOPICS, CATEGORIES)
 from .validators import inspect_image, inspect_video
 
 
@@ -67,34 +68,78 @@ class LoginForm(AuthenticationForm):
         return normalize_username(self.cleaned_data["username"])
 
 
-class RaceForm(forms.ModelForm):
-    class Meta:
-        model = Race
-        fields = ["product", "budget", "location"]
-        labels = {"product": "What product or service do you want?",
-                  "budget": "Your budget",
-                  "location": "Where are you right now?"}
-        widgets = {
-            "product": forms.TextInput(attrs={"placeholder": "e.g. A leather handbag"}),
-            "budget": forms.NumberInput(attrs={"placeholder": "e.g. 150.00", "step": "0.01"}),
-            "location": forms.TextInput(attrs={"placeholder": "e.g. Avondale, Harare"}),
-        }
+class RaceForm(forms.Form):
+    """Where the customer is. Products live in a RaceItem formset."""
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields["location"].required = True
-
-    def clean_budget(self):
-        b = self.cleaned_data["budget"]
-        if b <= 0:
-            raise forms.ValidationError("Budget must be more than 0.")
-        return b
+    location = forms.CharField(
+        label="Where are you right now?", max_length=200,
+        widget=forms.TextInput(attrs={"placeholder": "e.g. Avondale, Harare",
+                                      "autocomplete": "street-address"}))
+    latitude = forms.FloatField(required=False, widget=forms.HiddenInput())
+    longitude = forms.FloatField(required=False, widget=forms.HiddenInput())
 
     def clean_location(self):
         location = (self.cleaned_data.get("location") or "").strip()
         if not location:
             raise forms.ValidationError("Tell sellers where you are so they know where to deliver.")
         return location
+
+
+class RaceItemForm(forms.ModelForm):
+    """One product row in the multi-product race start form."""
+
+    class Meta:
+        model = RaceItem
+        fields = ["product", "budget", "quantity", "details"]
+        labels = {"product": "Product or service",
+                  "budget": "Budget",
+                  "quantity": "How many?",
+                  "details": "Details (optional)"}
+        widgets = {
+            "product": forms.TextInput(attrs={"placeholder": "e.g. A leather handbag"}),
+            "budget": forms.NumberInput(attrs={"placeholder": "e.g. 150.00", "step": "0.01"}),
+            "quantity": forms.NumberInput(attrs={"min": 1, "max": 99}),
+            "details": forms.TextInput(attrs={"placeholder": "Colour, size, brand, notes…"}),
+        }
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        # Extra blank rows are allowed so the customer can add products on the
+        # page. A row only needs values once they start filling it in.
+        self.fields["product"].required = False
+        self.fields["budget"].required = False
+        self.fields["quantity"].required = False
+
+    def clean_quantity(self):
+        return self.cleaned_data.get("quantity") or 1
+
+    def clean_budget(self):
+        b = self.cleaned_data.get("budget")
+        if b is not None and b <= 0:
+            raise forms.ValidationError("Budget must be more than 0.")
+        return b
+
+    def clean_product(self):
+        return (self.cleaned_data.get("product") or "").strip()[:200]
+
+    def clean(self):
+        cd = super().clean()
+        if cd.get("DELETE"):
+            return cd
+        product = (cd.get("product") or "").strip()
+        budget = cd.get("budget")
+        if not product and budget is None:
+            return cd                      # completely blank extra row
+        if not product:
+            self.add_error("product", "Tell sellers what you want.")
+        if budget is None:
+            self.add_error("budget", "Add a budget for this product.")
+        return cd
+
+
+RaceItemFormSet = inlineformset_factory(
+    Race, RaceItem, form=RaceItemForm, extra=1, min_num=1, validate_min=False,
+    can_delete=True)
 
 
 class JoinForm(forms.ModelForm):
@@ -104,6 +149,10 @@ class JoinForm(forms.ModelForm):
         required=False,
         widget=forms.FileInput(attrs={"accept": "image/*"}),
         help_text="You can add or change this later from “My photo”.")
+    item = forms.ModelChoiceField(
+        queryset=RaceItem.objects.none(), required=False,
+        label="Which product are you offering?",
+        empty_label="Choose a product…")
 
     class Meta:
         model = Participant
@@ -118,12 +167,24 @@ class JoinForm(forms.ModelForm):
 
     media_verified = False
 
-    def __init__(self, *a, needs_photo=False, **k):
+    def __init__(self, *a, needs_photo=False, race=None, items=None, **k):
         super().__init__(*a, **k)
         self.fields["image"].widget.attrs["accept"] = "image/*"
         self.fields["video"].widget.attrs["accept"] = "video/*"
         if not needs_photo:
             del self.fields["profile_photo"]
+        self.race = race
+        if race is not None:
+            choices = items if items is not None else list(race.items.all())
+            if not choices:
+                # Older single-product races have no RaceItem rows.
+                del self.fields["item"]
+            else:
+                self.fields["item"].queryset = RaceItem.objects.filter(
+                    pk__in=[i.pk for i in choices])
+                # With one product we fill it in automatically. With several
+                # the seller must say which product their offer answers.
+                self.fields["item"].required = len(choices) > 1
 
     def clean_price(self):
         p = self.cleaned_data["price"]
@@ -151,10 +212,22 @@ class ProfileForm(forms.ModelForm):
 
     class Meta:
         model = Profile
-        fields = ["photo", "category", "email", "phone"]
+        fields = ["photo", "category", "email", "phone",
+                  "shop_name", "shop_photo", "shop_location", "shop_lat", "shop_lng"]
         labels = {"photo": "Profile photo (your unique identifier)",
                   "category": "What do you sell?",
-                  "email": "Email address", "phone": "Phone number"}
+                  "email": "Email address", "phone": "Phone number",
+                  "shop_name": "Shop name (optional)",
+                  "shop_photo": "Shop picture (optional)",
+                  "shop_location": "Shop or business location",
+                  "shop_lat": "", "shop_lng": ""}
+        widgets = {
+            "shop_location": forms.TextInput(attrs={
+                "placeholder": "e.g. 24 Samora Machel Ave, Harare",
+                "autocomplete": "street-address"}),
+            "shop_lat": forms.HiddenInput(),
+            "shop_lng": forms.HiddenInput(),
+        }
 
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
@@ -178,12 +251,22 @@ class ProfileForm(forms.ModelForm):
             inspect_image(f)
         return f
 
+    def clean_shop_photo(self):
+        f = self.cleaned_data.get("shop_photo")
+        if f:
+            inspect_image(f)
+        return f
+
     def clean(self):
         cd = super().clean()
         if not (cd.get("email") or "").strip() and not (cd.get("phone") or "").strip():
             raise forms.ValidationError("Keep at least an email address or a phone number on your account.")
         if cd.get("email"):
             cd["email"] = cd["email"].strip().lower()
+        role = getattr(self.instance, "role", "none")
+        if role == "seller" and not (cd.get("shop_location") or "").strip():
+            self.add_error("shop_location",
+                           "Add your shop or business location so customers know where you are.")
         return cd
 
     def save(self, commit=True):

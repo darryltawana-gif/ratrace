@@ -13,7 +13,7 @@ from . import services as sv
 from .consumers import RaceConsumer
 from .models import (AccountGroup, AccountIdentity, ChatRoom, Circle, CircleMember,
                      CircleMessage, Participant, Post, Profile, QualitySession,
-                     Race, Report, Review)
+                     Race, RaceItem, Report, Review)
 
 
 def make_user(username, role="customer", email="", phone=""):
@@ -443,6 +443,206 @@ class JoinRaceTests(TestCase):
         self.assertEqual(response.status_code, 200)
         form = response.context["form"]
         self.assertFalse(form.fields["profile_photo"].required)
+
+
+class MultiProductRaceTests(TestCase):
+    """A customer posts several products in one race; sellers answer each one."""
+
+    def setUp(self):
+        self.customer = make_user("multibuyer", "customer")
+        self.seller = make_user("multiseller", "seller")
+
+    def test_customer_can_start_one_race_with_many_products(self):
+        self.client.force_login(self.customer)
+        response = self.client.post("/start/", {
+            "location": "Avondale, Harare",
+            "latitude": "-17.800000",
+            "longitude": "31.040000",
+            "items-TOTAL_FORMS": "2",
+            "items-INITIAL_FORMS": "0",
+            "items-MIN_NUM_FORMS": "1",
+            "items-MAX_NUM_FORMS": "1000",
+            "items-0-product": "Leather handbag",
+            "items-0-budget": "120.00",
+            "items-0-quantity": "1",
+            "items-0-details": "Black, medium",
+            "items-1-product": "Running shoes",
+            "items-1-budget": "80.00",
+            "items-1-quantity": "2",
+            "items-1-details": "Size 42",
+        })
+        self.assertEqual(response.status_code, 302)
+        race = Race.objects.get(customer=self.customer)
+        self.assertEqual(race.items.count(), 2)
+        self.assertEqual(race.product, "Leather handbag")
+        self.assertEqual(str(race.budget), "120.00")
+        self.assertEqual(race.customer_lat, -17.8)
+        self.assertEqual(race.items.last().product, "Running shoes")
+
+    def test_customer_start_requires_at_least_one_product(self):
+        self.client.force_login(self.customer)
+        response = self.client.post("/start/", {
+            "location": "Avondale, Harare",
+            "items-TOTAL_FORMS": "1",
+            "items-INITIAL_FORMS": "0",
+            "items-MIN_NUM_FORMS": "1",
+            "items-MAX_NUM_FORMS": "1000",
+            "items-0-product": "",
+            "items-0-budget": "",
+            "items-0-quantity": "1",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Add at least one product or service you want.")
+        self.assertFalse(Race.objects.filter(customer=self.customer).exists())
+
+    def test_seller_can_enter_the_same_race_for_two_products(self):
+        race = Race.objects.create(customer=self.customer, product="Handbag", budget=100)
+        bag = RaceItem.objects.create(race=race, position=1, product="Handbag", budget=100)
+        shoes = RaceItem.objects.create(race=race, position=2, product="Shoes", budget=60)
+        self.client.force_login(self.seller)
+        first = self.client.post(f"/race/{race.id}/", {
+            "item": str(bag.id), "price": "80.00", "details": "Bag offer",
+            "image": jpeg_upload("bag.jpg"),
+        })
+        self.assertEqual(first.status_code, 302)
+        second = self.client.post(f"/race/{race.id}/", {
+            "item": str(shoes.id), "price": "45.00", "details": "Shoe offer",
+            "image": jpeg_upload("shoes.jpg"),
+        })
+        self.assertEqual(second.status_code, 302)
+        offers = Participant.objects.filter(race=race, seller=self.seller, active=True)
+        self.assertEqual(offers.count(), 2)
+        self.assertEqual(set(offers.values_list("item_id", flat=True)), {bag.id, shoes.id})
+        # Both offers are clearly labelled with the product they answer.
+        state = sv.race_state(race.id)
+        labels = {p["item_product"] for p in state["participants"]}
+        self.assertEqual(labels, {"Handbag", "Shoes"})
+
+
+class LiveLocationTests(TestCase):
+    """Coordinates, distance and shop details travel with the race state."""
+
+    def setUp(self):
+        self.customer = make_user("mapbuyer", "customer")
+        self.seller = make_user("mapseller", "seller")
+        profile = sv.get_profile(self.seller)
+        profile.shop_name = "Maple Shop"
+        profile.shop_location = "24 Samora Machel Ave, Harare"
+        profile.shop_lat = -17.8292
+        profile.shop_lng = 31.0522
+        profile.save()
+        self.race = Race.objects.create(customer=self.customer, product="Lamp", budget=40)
+        self.item = RaceItem.objects.create(race=self.race, position=1, product="Lamp", budget=40)
+        self.offer = Participant.objects.create(
+            race=self.race, seller=self.seller, item=self.item, slot=1,
+            display_name="Map Seller", product_name="Lamp", price=35,
+            details="", image="products/lamp.jpg")
+
+    def test_customer_location_is_stored_and_broadcast(self):
+        payload = sv.update_location(self.customer, self.race.id, -17.8252, 31.0335)
+        self.race.refresh_from_db()
+        self.assertAlmostEqual(self.race.customer_lat, -17.8252)
+        self.assertIsNotNone(payload)
+        self.assertAlmostEqual(payload["customer"]["lat"], -17.8252)
+        # The seller's shop pin becomes the fallback position on the map.
+        seller = payload["sellers"][0]
+        self.assertAlmostEqual(seller["lat"], -17.8292)
+        self.assertEqual(seller["shop_name"], "Maple Shop")
+        self.assertIsNotNone(seller["distance_m"])
+
+    def test_seller_live_location_follows_them_between_races(self):
+        sv.update_location(self.seller, self.race.id, -17.8100, 31.0600)
+        profile = sv.get_profile(self.seller)
+        self.assertAlmostEqual(profile.latitude, -17.81)
+        state = sv.race_state(self.race.id)
+        lane = state["participants"][0]
+        self.assertEqual(lane["location_source"], "live")
+        self.assertAlmostEqual(lane["lat"], -17.81)
+
+    def test_only_race_members_may_report_a_location(self):
+        stranger = make_user("mapstranger", "seller")
+        self.assertIsNone(sv.update_location(stranger, self.race.id, -17.8, 31.0))
+        self.assertIsNone(sv.update_location(self.seller, self.race.id, "not-a-number", "x"))
+
+    def test_race_room_shows_map_items_distance_and_shop(self):
+        sv.update_location(self.customer, self.race.id, -17.8252, 31.0335)
+        self.client.force_login(self.customer)
+        response = self.client.get(f"/race/{self.race.id}/")
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode()
+        self.assertIn("Live map", body)
+        self.assertIn("Lamp", body)
+        self.assertIn("Directions", body)
+        self.assertIn("away", body)
+        self.assertIn("Car", body)
+        self.assertIn("Weather here", body)
+        # The shop details are sent in the live state payload.
+        state = sv.race_state(self.race.id)
+        self.assertEqual(state["participants"][0]["shop_name"], "Maple Shop")
+        self.assertIsNotNone(state["participants"][0]["distance_m"])
+
+
+class ShopProfileTests(TestCase):
+    def setUp(self):
+        self.seller = make_user("shopseller", "seller", email="shop@example.com")
+
+    def test_seller_must_add_a_shop_location(self):
+        self.client.force_login(self.seller)
+        response = self.client.post("/profile/", {
+            "username": "shopseller", "email": "shop@example.com", "phone": "",
+            "category": "gadgets", "shop_name": "Optional Name",
+            "shop_location": "", "shop_lat": "", "shop_lng": "",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Add your shop or business location")
+        self.assertFalse(sv.get_profile(self.seller).shop_location)
+
+    def test_seller_can_save_optional_shop_name_and_required_location(self):
+        self.client.force_login(self.seller)
+        response = self.client.post("/profile/", {
+            "username": "shopseller", "email": "shop@example.com", "phone": "",
+            "category": "gadgets", "shop_name": "Maple Shop",
+            "shop_location": "24 Samora Machel Ave, Harare",
+            "shop_lat": "-17.8292", "shop_lng": "31.0522",
+        })
+        self.assertEqual(response.status_code, 302)
+        profile = sv.get_profile(self.seller)
+        self.assertEqual(profile.shop_name, "Maple Shop")
+        self.assertAlmostEqual(profile.shop_lat, -17.8292)
+
+    def test_public_seller_page_shows_shop_and_directions(self):
+        profile = sv.get_profile(self.seller)
+        profile.shop_name = "Maple Shop"
+        profile.shop_location = "24 Samora Machel Ave, Harare"
+        profile.shop_lat = -17.8292
+        profile.shop_lng = 31.0522
+        profile.save()
+        response = self.client.get(f"/seller/{self.seller.id}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Maple Shop")
+        self.assertContains(response, "Directions")
+
+
+class SellerMultipleRacesTests(TestCase):
+    def test_seller_home_lists_every_live_race(self):
+        seller = make_user("busyseller", "seller")
+        first_customer = make_user("busybuyer1", "customer")
+        second_customer = make_user("busybuyer2", "customer")
+        first = Race.objects.create(customer=first_customer, product="Radio", budget=30)
+        second = Race.objects.create(customer=second_customer, product="Kettle", budget=25)
+        Participant.objects.create(race=first, seller=seller, slot=1, display_name="Busy",
+                                   product_name="Radio", price=20, details="",
+                                   image="products/r.jpg")
+        Participant.objects.create(race=second, seller=seller, slot=1, display_name="Busy",
+                                   product_name="Kettle", price=18, details="",
+                                   image="products/k.jpg")
+        self.client.force_login(seller)
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode()
+        self.assertIn("Your live races", body)
+        self.assertIn("Radio", body)
+        self.assertIn("Kettle", body)
 
 
 class QualitySessionTests(TestCase):

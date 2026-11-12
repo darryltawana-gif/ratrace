@@ -12,7 +12,7 @@ from django.db.models import Count, Q
 from django.template.loader import render_to_string
 from django.utils import timezone
 
-from .models import (Race, Participant, Profile, ChatRoom, ChatMessage,
+from .models import (Race, RaceItem, Participant, Profile, ChatRoom, ChatMessage,
                      Post, Circle, CircleMember, CircleMessage, CircleReaction,
                      PushSubscription, AccountGroup, AccountIdentity, QualitySession,
                      MAX_SELLERS, RACE_MINUTES, CIRCLE_TOPICS, CIRCLE_TOPIC_KEYS,
@@ -131,7 +131,12 @@ def display_name(user, race):
 
 def lobby_race(r):
     # No customer location here: this payload is visible to everyone on the site.
+    items = [{"id": i.id, "product": i.product, "budget": str(i.budget),
+              "quantity": i.quantity} for i in r.items.all()]
+    if not items and r.product:
+        items = [{"id": 0, "product": r.product, "budget": str(r.budget), "quantity": 1}]
     return {"id": r.id, "product": r.product, "budget": str(r.budget),
+            "items": items, "item_count": len(items),
             "started_at": r.started_at.isoformat(), "expires_at": r.expires_at.isoformat(),
             "slots_left": MAX_SELLERS - r.participants.filter(active=True).count()}
 
@@ -139,6 +144,147 @@ def lobby_race(r):
 def live_races():
     expire_races()
     return Race.objects.filter(status="open", expires_at__gt=timezone.now()).order_by("-started_at")
+
+
+# ------------------------------- Products in a race -------------------------------
+
+def race_items(race):
+    """The requested products for a race, with a legacy single-product fallback."""
+    items = list(race.items.all())
+    if items:
+        return [{"id": i.id, "position": i.position, "product": i.product,
+                 "budget": str(i.budget), "quantity": i.quantity,
+                 "details": i.details} for i in items]
+    if race.product:
+        return [{"id": 0, "position": 1, "product": race.product,
+                 "budget": str(race.budget), "quantity": 1, "details": ""}]
+    return []
+
+
+def primary_item(race):
+    item = race.items.first()
+    if item:
+        return item
+    return None
+
+
+# ------------------------------- Live location & distance -------------------------------
+
+def _valid_coord(lat, lng):
+    try:
+        lat = float(lat)
+        lng = float(lng)
+    except (TypeError, ValueError):
+        return None, None
+    if lat != lat or lng != lng:          # NaN
+        return None, None
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None, None
+    return lat, lng
+
+
+def haversine_m(lat1, lng1, lat2, lng2):
+    """Great-circle distance in metres."""
+    from math import asin, cos, radians, sin, sqrt
+    if None in (lat1, lng1, lat2, lng2):
+        return None
+    r = 6371000
+    p1, p2 = radians(lat1), radians(lat2)
+    dp = radians(lat2 - lat1)
+    dl = radians(lng2 - lng1)
+    a = sin(dp / 2) ** 2 + cos(p1) * cos(p2) * sin(dl / 2) ** 2
+    return int(2 * r * asin(sqrt(min(1, max(0, a)))))
+
+
+def distance_label(metres):
+    if metres is None:
+        return ""
+    if metres < 1000:
+        return f"{metres} m"
+    return f"{metres / 1000:.1f} km"
+
+
+def seller_position(profile):
+    """The seller's live position, falling back to their shop pin."""
+    if profile and profile.latitude is not None and profile.longitude is not None:
+        return profile.latitude, profile.longitude, "live"
+    if profile and profile.shop_lat is not None and profile.shop_lng is not None:
+        return profile.shop_lat, profile.shop_lng, "shop"
+    return None, None, ""
+
+
+def customer_position(race):
+    if race.customer_lat is not None and race.customer_lng is not None:
+        return race.customer_lat, race.customer_lng
+    return None, None
+
+
+def distance_to_customer(race, profile):
+    clat, clng = customer_position(race)
+    slat, slng, source = seller_position(profile)
+    metres = haversine_m(clat, clng, slat, slng)
+    return {"distance_m": metres, "distance": distance_label(metres),
+            "distance_source": source}
+
+
+def update_location(user, race_id, lat, lng):
+    """Persist a live browser position and return a broadcast-ready payload.
+
+    A customer's position lives on the race; a seller's latest position lives
+    on their profile (so it follows them between races). Only people with
+    access to the race may report a position.
+    """
+    race = Race.objects.filter(pk=race_id).first()
+    if not race or not race_access(user, race_id):
+        return None
+    lat, lng = _valid_coord(lat, lng)
+    if lat is None:
+        return None
+    now = timezone.now()
+    profile = get_profile(user)
+    profile.latitude, profile.longitude, profile.location_at = lat, lng, now
+    profile.save(update_fields=["latitude", "longitude", "location_at"])
+    if race.customer_id == user.id:
+        race.customer_lat, race.customer_lng = lat, lng
+        race.customer_location_at = now
+        race.save(update_fields=["customer_lat", "customer_lng", "customer_location_at"])
+    return location_payload(race_id)
+
+
+def location_payload(race_id):
+    """Coordinates for the race map: customer plus every active seller."""
+    race = Race.objects.filter(pk=race_id).first()
+    if not race:
+        return None
+    clat, clng = customer_position(race)
+    sellers = []
+    for p in race.participants.filter(active=True).select_related("seller__profile"):
+        prof = getattr(p.seller, "profile", None)
+        slat, slng, source = seller_position(prof)
+        sellers.append({
+            "participant_id": p.id, "seller_id": p.seller_id, "name": p.display_name,
+            "item_id": p.item_id, "lat": slat, "lng": slng, "source": source,
+            "shop_name": getattr(prof, "shop_name", "") or "",
+            "shop_location": getattr(prof, "shop_location", "") or "",
+            "distance_m": haversine_m(clat, clng, slat, slng),
+        })
+    return {"type": "location", "race_id": race.id,
+            "customer": {"lat": clat, "lng": clng,
+                         "at": race.customer_location_at.isoformat() if race.customer_location_at else ""},
+            "sellers": sellers}
+
+
+def clear_location(user, race_id):
+    """Stop showing a live position when the user leaves the race map."""
+    race = Race.objects.filter(pk=race_id).first()
+    if not race:
+        return False
+    if race.customer_id == user.id:
+        race.customer_lat = race.customer_lng = None
+        race.customer_location_at = None
+        race.save(update_fields=["customer_lat", "customer_lng", "customer_location_at"])
+        return True
+    return False
 
 
 def end_message(race):
@@ -168,18 +314,33 @@ def seconds_left(race_id):
     return (r.expires_at - timezone.now()).total_seconds() if r.status == "open" else 0
 
 
-def participant_dict(p, review_badges=None):
-    photo = getattr(getattr(p.seller, "profile", None), "photo", None)
-    category = getattr(getattr(p.seller, "profile", None), "category_label", "")
+def participant_dict(p, review_badges=None, race=None):
+    prof = getattr(p.seller, "profile", None)
+    photo = getattr(prof, "photo", None)
+    shop_photo = getattr(prof, "shop_photo", None)
+    category = getattr(prof, "category_label", "")
     badges = review_badges or []
     now = timezone.now()
     viewing = bool(p.customer_viewing_at and
                   now - p.customer_viewing_at <= timedelta(seconds=PRESENCE_TTL))
+    slat, slng, source = seller_position(prof)
+    dist = distance_to_customer(race, prof) if race is not None else {}
+    item = p.item
     return {"id": p.id, "slot": p.slot, "seller_id": p.seller_id, "name": p.display_name,
             "product": p.product_name, "price": str(p.price), "final_price": str(p.final_price),
             "details": p.details, "image": p.image.url, "video": p.video.url if p.video else "",
             "media_verified": p.media_verified, "category": category,
             "photo": photo.url if photo else "",
+            "item_id": p.item_id or 0,
+            "item_product": item.product if item else "",
+            "shop_name": getattr(prof, "shop_name", "") or "",
+            "shop_photo": shop_photo.url if shop_photo else "",
+            "shop_location": getattr(prof, "shop_location", "") or "",
+            "shop_lat": getattr(prof, "shop_lat", None),
+            "shop_lng": getattr(prof, "shop_lng", None),
+            "lat": slat, "lng": slng, "location_source": source,
+            "distance_m": dist.get("distance_m"), "distance": dist.get("distance", ""),
+            "distance_source": dist.get("distance_source", ""),
             "review_badges": badges,
             "review_badges_html": render_to_string(
                 "includes/review_badges.html",
@@ -253,15 +414,20 @@ def presence_payload(race_id):
 
 def race_state(race_id):
     r = Race.objects.get(pk=race_id)
-    parts = list(r.participants.filter(active=True).select_related("seller__profile").order_by("slot"))
+    parts = list(r.participants.filter(active=True)
+                 .select_related("seller__profile", "item").order_by("slot"))
     badges_by_seller = {p.user_id: p.review_badges
                         for p in annotated_sellers().filter(user_id__in={x.seller_id for x in parts})}
+    clat, clng = customer_position(r)
+    items = race_items(r)
     return {"race": {"id": r.id, "product": r.product, "budget": str(r.budget),
                      "location": r.location,
+                     "items": items, "item_count": len(items),
+                     "customer_lat": clat, "customer_lng": clng,
                      "status": r.status,
                      "started_at": r.started_at.isoformat(), "expires_at": r.expires_at.isoformat(),
                      "winner_id": r.winner_id, "slots_left": MAX_SELLERS - len(parts)},
-            "participants": [participant_dict(p, badges_by_seller.get(p.seller_id, []))
+            "participants": [participant_dict(p, badges_by_seller.get(p.seller_id, []), race=r)
                              for p in parts]}
 
 
@@ -271,13 +437,19 @@ def next_slot(race):
 
 
 @transaction.atomic
-def adjust(user, race_id, field, direction):
+def adjust(user, race_id, field, direction, pid=None):
     if direction not in (1, -1):
         return False
     race = Race.objects.get(pk=race_id)
     if not race.is_live:
         return False
-    p = Participant.objects.select_for_update().filter(race=race, seller=user, active=True).first()
+    qs = Participant.objects.select_for_update().filter(race=race, seller=user, active=True)
+    if pid:
+        try:
+            qs = qs.filter(pk=pid)
+        except (TypeError, ValueError):
+            return False
+    p = qs.first()
     if not p:
         return False
     if field == "discount":
@@ -294,12 +466,17 @@ def adjust(user, race_id, field, direction):
     return True
 
 
-def set_promo_item(user, race_id, text):
+def set_promo_item(user, race_id, text, pid=None):
     race = Race.objects.get(pk=race_id)
     if not race.is_live:
         return False
-    updated = Participant.objects.filter(race=race, seller=user, active=True, promo__gt=0).update(
-        promo_item=(text or "").strip()[:120])
+    qs = Participant.objects.filter(race=race, seller=user, active=True, promo__gt=0)
+    if pid:
+        try:
+            qs = qs.filter(pk=pid)
+        except (TypeError, ValueError):
+            return False
+    updated = qs.update(promo_item=(text or "").strip()[:120])
     return bool(updated)
 
 
@@ -751,8 +928,16 @@ def push_race_started(race, reopened=False):
         subs = list(PushSubscription.objects.exclude(user=race.customer)
                     .exclude(user__profile__role="customer")
                     .values("endpoint", "p256dh", "auth"))
+        items = list(race.items.all())
+        if len(items) > 1:
+            label = f"{items[0].product} + {len(items) - 1} more"
+            budget = sum((i.budget for i in items), 0)
+        elif items:
+            label, budget = items[0].product, items[0].budget
+        else:
+            label, budget = race.product, race.budget
         payload = {"title": "🟢 Race re-opened!" if reopened else "🟢 New race started!",
-                   "body": f"A customer wants “{race.product}” (budget {race.budget}). Tap to enter the race!",
+                   "body": f"A customer wants “{label}” (budget {budget}). Tap to enter the race!",
                    "url": f"/race/{race.id}/", "tag": f"race-{race.id}", "sticky": True}
         return _dispatch(subs, payload, RACE_MINUTES * 60)
     except Exception:

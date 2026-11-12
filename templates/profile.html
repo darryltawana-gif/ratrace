@@ -1,12 +1,28 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="card narrow" style="max-width:560px">
+<style>
+ .prof-head{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+ .shop-preview{display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:#f7f9ff;border:1px solid #e0e8f6;
+   border-radius:14px;padding:10px 12px;margin:6px 0 16px}
+ .shop-preview img,.shop-preview .ph{width:64px;height:64px;border-radius:12px;object-fit:cover;border:1px solid #d7e1f4}
+ .shop-preview .ph{display:flex;align-items:center;justify-content:center;background:#e8eefc;font-size:1.6rem}
+ .shop-preview .sp-body{flex:1;min-width:160px}
+ .shop-preview .sp-body b{display:block}
+ .shop-preview .sp-body span{font-size:.84rem;color:#5b6b8c}
+ .shop-section{border-top:2px dashed #e0e8f6;margin-top:18px;padding-top:14px}
+ .shop-section h3{margin:0 0 4px;font-size:1.1rem}
+ .loc-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px}
+ #shopLocStatus{font-size:.84rem;color:#5b6b8c;margin:6px 0 0}
+</style>
+
+<div class="card narrow" style="max-width:600px">
   <h2 style="margin-top:0">{{ profile.role|capfirst }} profile</h2>
-  <div class="row" style="gap:14px;margin-bottom:8px">
+  <div class="prof-head">
     {% if profile.photo %}<img class="avatar" style="width:96px;height:96px" src="{{ profile.photo.url }}" alt="">
     {% else %}<div class="avatar ph" style="width:96px;height:96px;font-size:2rem">{{ user.username|slice:":1"|upper }}</div>{% endif %}
     <div>
       <b style="font-size:1.15rem">{{ user.username }}</b><br>
+      {% if profile.shop_name %}<span class="chip">🏪 {{ profile.shop_name }}</span>{% endif %}
       {% if profile.category_label %}<span class="chip">{{ profile.category_label }}</span>{% endif %}
       {% include "includes/badge.html" with badge=profile.badge %}
       {% if profile.role == 'seller' %}{% include "includes/review_badges.html" with badges=profile.review_badges %}{% endif %}
@@ -14,18 +30,106 @@
   </div>
   <p class="muted" style="margin-top:0">Your photo and username are shown to customers on the home page and on every race.</p>
 
-  <form method="post" enctype="multipart/form-data">{% csrf_token %}
+  {% if profile.role == 'seller' %}
+    {% if profile.shop_name or profile.shop_location %}
+    <div class="shop-preview">
+      {% if profile.shop_photo %}<img src="{{ profile.shop_photo.url }}" alt="{{ profile.shop_name }}">
+      {% else %}<div class="ph">🏪</div>{% endif %}
+      <div class="sp-body">
+        <b>{{ profile.shop_name|default:"Your shop" }}</b>
+        <span>{{ profile.shop_location|default:"Add a location so customers can find you" }}</span>
+      </div>
+      {% if profile.shop_lat is not None and profile.shop_lng is not None %}
+      <a class="btn small ghost" target="_blank" rel="noopener"
+         href="https://www.openstreetmap.org/?mlat={{ profile.shop_lat }}&mlon={{ profile.shop_lng }}#map=17/{{ profile.shop_lat }}/{{ profile.shop_lng }}">🧭 View pin</a>
+      {% endif %}
+    </div>
+    {% endif %}
+  {% endif %}
+
+  <form method="post" enctype="multipart/form-data" id="profileForm">{% csrf_token %}
     {{ form.non_field_errors }}
-    {% for field in form %}
-      <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-      {{ field }}
-      {% if field.help_text %}<p class="msg-note">{{ field.help_text }}</p>{% endif %}
-      {% for e in field.errors %}<div class="err">{{ e }}</div>{% endfor %}
-    {% endfor %}
+
+    <label for="{{ form.username.id_for_label }}">{{ form.username.label }}</label>
+    {{ form.username }}
+    {% for e in form.username.errors %}<div class="err">{{ e }}</div>{% endfor %}
+
+    <label for="{{ form.photo.id_for_label }}">{{ form.photo.label }}</label>
+    {{ form.photo }}
+    {% for e in form.photo.errors %}<div class="err">{{ e }}</div>{% endfor %}
+
+    {% if profile.role == 'seller' %}
+    <label for="{{ form.category.id_for_label }}">{{ form.category.label }}</label>
+    {{ form.category }}
+    {% for e in form.category.errors %}<div class="err">{{ e }}</div>{% endfor %}
+    {% endif %}
+
+    <label for="{{ form.email.id_for_label }}">{{ form.email.label }}</label>
+    {{ form.email }}
+    {% for e in form.email.errors %}<div class="err">{{ e }}</div>{% endfor %}
+
+    <label for="{{ form.phone.id_for_label }}">{{ form.phone.label }}</label>
+    {{ form.phone }}
+    {% for e in form.phone.errors %}<div class="err">{{ e }}</div>{% endfor %}
+
+    {% if profile.role == 'seller' %}
+    <div class="shop-section">
+      <h3>🏪 Your shop</h3>
+      <p class="msg-note" style="margin-top:0">Your shop name and picture are optional. Your shop or business location is
+        required so customers can see where you are and get live distance and directions on the race map.</p>
+
+      <label for="{{ form.shop_name.id_for_label }}">{{ form.shop_name.label }}</label>
+      {{ form.shop_name }}
+      {% for e in form.shop_name.errors %}<div class="err">{{ e }}</div>{% endfor %}
+
+      <label for="{{ form.shop_photo.id_for_label }}">{{ form.shop_photo.label }}</label>
+      {{ form.shop_photo }}
+      {% for e in form.shop_photo.errors %}<div class="err">{{ e }}</div>{% endfor %}
+
+      <label for="{{ form.shop_location.id_for_label }}">{{ form.shop_location.label }}</label>
+      {{ form.shop_location }}
+      {% for e in form.shop_location.errors %}<div class="err">{{ e }}</div>{% endfor %}
+      {{ form.shop_lat }}{{ form.shop_lng }}
+      <div class="loc-row">
+        <button type="button" class="btn small ghost" id="useShopLocation">📍 Use my current location</button>
+        <span class="muted" style="font-size:.82rem">Pins your shop on the live map.</span>
+      </div>
+      <p id="shopLocStatus" aria-live="polite"></p>
+    </div>
+    {% endif %}
+
     <button class="btn" style="width:100%;margin-top:16px">Save profile</button>
   </form>
   {% if profile.role == 'seller' %}
   <p style="margin-top:14px"><a href="{% url 'my_posts' %}">🛍 Manage my products and services →</a></p>
   {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  const btn = document.getElementById('useShopLocation');
+  if (!btn) return;
+  const lat = document.getElementById('{{ form.shop_lat.id_for_label }}');
+  const lng = document.getElementById('{{ form.shop_lng.id_for_label }}');
+  const loc = document.getElementById('{{ form.shop_location.id_for_label }}');
+  const status = document.getElementById('shopLocStatus');
+  btn.onclick = () => {
+    if (!navigator.geolocation){ status.textContent = 'This browser cannot share your location.'; return; }
+    status.textContent = 'Finding your shop location…';
+    navigator.geolocation.getCurrentPosition(pos => {
+      const c = pos.coords;
+      if (lat) lat.value = c.latitude.toFixed(6);
+      if (lng) lng.value = c.longitude.toFixed(6);
+      if (loc && !loc.value.trim()) loc.value = 'My shop (pinned live)';
+      status.textContent = '📍 Shop pin saved (' + c.latitude.toFixed(4) + ', ' + c.longitude.toFixed(4) + '). Save your profile to keep it.';
+    }, err => {
+      status.textContent = err.code === 1
+        ? 'Location permission was blocked. Type your shop address instead.'
+        : 'Could not get your location. Type your shop address instead.';
+    }, {enableHighAccuracy:true, timeout:12000, maximumAge:30000});
+  };
+})();
+</script>
 {% endblock %}

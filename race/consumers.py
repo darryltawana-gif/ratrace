@@ -80,10 +80,21 @@ class RaceConsumer(Base):
             except (TypeError, ValueError):
                 return
             ok = await database_sync_to_async(services.adjust)(
-                user, self.race_id, content.get("field"), direction)
+                user, self.race_id, content.get("field"), direction,
+                content.get("pid"))
         elif action == "promo_item":
             ok = await database_sync_to_async(services.set_promo_item)(
-                user, self.race_id, str(content.get("text", "")))
+                user, self.race_id, str(content.get("text", "")),
+                content.get("pid"))
+        elif action == "location":
+            # Live map position from the browser. Only race members may
+            # report, and the server validates the coordinates.
+            payload = await database_sync_to_async(services.update_location)(
+                user, self.race_id, content.get("lat"), content.get("lng"))
+            if payload:
+                await self.channel_layer.group_send(
+                    self.group, {"type": "relay", "payload": payload})
+            return
         elif action == "viewing":
             # Customer reports which seller lanes are on screen right now.
             # Broadcast only the lightweight presence lists, never a full

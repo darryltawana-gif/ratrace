@@ -115,6 +115,20 @@ class Profile(models.Model):
     account_group = models.ForeignKey(AccountGroup, null=True, blank=True,
                                       on_delete=models.SET_NULL, related_name="profiles")
 
+    # ------------------------------ Shop & live location ------------------------------
+    # A seller's shop is optional, but the location (address) is required for
+    # sellers so customers always know where to collect or meet.
+    shop_name = models.CharField(max_length=120, blank=True, default="")
+    shop_photo = models.ImageField(upload_to="shops/", blank=True, null=True)
+    shop_location = models.CharField(max_length=200, blank=True, default="")
+    shop_lat = models.FloatField(blank=True, null=True)
+    shop_lng = models.FloatField(blank=True, null=True)
+    # Latest live position shared from the browser. Used for the race-room map
+    # and for the real-time distance between customer and seller.
+    latitude = models.FloatField(blank=True, null=True)
+    longitude = models.FloatField(blank=True, null=True)
+    location_at = models.DateTimeField(blank=True, null=True)
+
     @property
     def other_accounts(self):
         if not self.account_group_id:
@@ -207,6 +221,8 @@ def review_badges_from_counts(counts):
 class Race(models.Model):
     STATUS = [("open", "Open"), ("closed", "Closed"), ("expired", "Expired"), ("won", "Won")]
     customer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="races")
+    # ``product`` and ``budget`` mirror the first RaceItem so older code and
+    # older races keep working. New races should always have RaceItems.
     product = models.CharField(max_length=200)
     budget = models.DecimalField(max_digits=10, decimal_places=2)
     location = models.CharField(max_length=200, blank=True, default="")
@@ -214,6 +230,12 @@ class Race(models.Model):
     started_at = models.DateTimeField(default=timezone.now)
     expires_at = models.DateTimeField(blank=True, null=True)
     winner = models.ForeignKey("Participant", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+
+    # The customer's live position, shared from the browser while the race is
+    # open. Only people inside the race can see these coordinates.
+    customer_lat = models.FloatField(blank=True, null=True)
+    customer_lng = models.FloatField(blank=True, null=True)
+    customer_location_at = models.DateTimeField(blank=True, null=True)
 
     def save(self, *a, **k):
         if not self.expires_at:
@@ -224,13 +246,45 @@ class Race(models.Model):
     def is_live(self):
         return self.status == "open" and self.expires_at > timezone.now()
 
+    @property
+    def primary_item(self):
+        return self.items.first()
+
+    @property
+    def item_count(self):
+        return self.items.count() or (1 if self.product else 0)
+
     def __str__(self):
         return f"Race #{self.pk}: {self.product}"
+
+
+class RaceItem(models.Model):
+    """One product or service the customer is racing for.
+
+    A customer may post several products in a single race. Each item has its
+    own budget and details, and sellers offer against the item they choose.
+    """
+    race = models.ForeignKey(Race, on_delete=models.CASCADE, related_name="items")
+    position = models.PositiveSmallIntegerField(default=1)
+    product = models.CharField(max_length=200)
+    budget = models.DecimalField(max_digits=10, decimal_places=2)
+    quantity = models.PositiveSmallIntegerField(default=1)
+    details = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["position", "id"]
+
+    def __str__(self):
+        return f"{self.product} (race {self.race_id})"
 
 
 class Participant(models.Model):
     race = models.ForeignKey(Race, on_delete=models.CASCADE, related_name="participants")
     seller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    # Which requested RaceItem this offer answers. Null for older races and
+    # for races created before multi-product support.
+    item = models.ForeignKey(RaceItem, null=True, blank=True,
+                             on_delete=models.SET_NULL, related_name="offers")
     slot = models.PositiveSmallIntegerField()            # internal ordering only
     display_name = models.CharField(max_length=60)
     product_name = models.CharField(max_length=120)

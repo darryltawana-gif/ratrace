@@ -1,4 +1,8 @@
 {% extends "base.html" %}
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+{% endblock %}
 {% block content %}
 <style>
  .body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin-top:12px}
@@ -34,10 +38,22 @@
 {{ ice_servers|json_script:"ice-config" }}
 
 <div class="card">
-  <div class="row"><h2 style="margin:0">{{ race.product }}</h2><span class="chip">Budget {{ race.budget }}</span></div>
+  <div class="row" style="align-items:flex-start">
+    <h2 style="margin:0;flex:1;min-width:180px">{{ race.product }}{% if items|length > 1 %} <span class="muted" style="font-size:.9rem;font-weight:700">+ {{ items|length|add:"-1" }} more</span>{% endif %}</h2>
+    <span class="chip">{% if items|length > 1 %}{{ items|length }} products{% else %}Budget {{ race.budget }}{% endif %}</span>
+  </div>
+  <div class="items" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0">
+    {% for it in items %}
+    <span class="item-chip" title="{{ it.details|default:'' }}">{{ it.product }} <span class="qty">×{{ it.quantity }}</span>
+      <span class="muted">budget {{ it.budget }}</span></span>
+    {% empty %}
+    <span class="item-chip">{{ race.product }} <span class="qty">×1</span> <span class="muted">budget {{ race.budget }}</span></span>
+    {% endfor %}
+  </div>
   <p class="muted" style="margin:.5em 0">
     Started at <b id="start"></b> · <span id="cd"></span> · Spots left <b id="slots"></b>/10
     {% if race.location and is_owner or race.location and mine %}<br>📍 Customer location: <b>{{ race.location }}</b>{% endif %}
+    <span id="myDistance" class="chip distance-chip" hidden></span>
   </p>
   {% if is_owner and race.is_live %}
   <div class="row">
@@ -52,6 +68,38 @@
     <form method="post" action="{% url 'seller_leave' race.id %}" onsubmit="return confirm('Leave the race?')">{% csrf_token %}<button class="btn danger">Exit race</button></form>
   </div>
   {% endif %}
+</div>
+
+<div class="map-panel" id="liveMapPanel">
+  <div class="mp-head">
+    <h3><span class="live-dot"></span> Live map &amp; directions</h3>
+    <span class="chip" id="mapStatus">Locating…</span>
+    {% if is_owner or mine %}
+    <button type="button" class="btn small ghost" id="shareLocationBtn" style="margin-left:auto">📍 Share my live location</button>
+    {% endif %}
+  </div>
+  <div class="map-shell">
+    <div id="liveMap" class="map-canvas" role="application" aria-label="Live race map"></div>
+    <div id="mapFallback" class="map-fallback">
+      <b>Map tiles could not load.</b><br>
+      Your live distance, ETA, parking, traffic and weather still update below.
+    </div>
+  </div>
+  <div class="map-controls" id="modeControls" role="group" aria-label="Travel mode">
+    <span class="muted" style="font-size:.82rem;font-weight:800">Travel mode</span>
+    <button type="button" class="mode-btn active" data-mode="car">🚗 Car</button>
+    <button type="button" class="mode-btn" data-mode="walk">🚶 Walk</button>
+    <button type="button" class="mode-btn" data-mode="bike">🚲 Bike</button>
+    <button type="button" class="mode-btn" data-mode="transit">🚌 Transit</button>
+  </div>
+  <div class="map-grid">
+    <div class="map-stat eta"><div class="k">ETA to customer</div><div class="v" id="etaValue">—</div><div class="why" id="etaWhy">Waiting for a location…</div></div>
+    <div class="map-stat"><div class="k">Distance</div><div class="v" id="distValue">—</div><div class="why" id="distWhy">Straight-line estimate</div></div>
+    <div class="map-stat traffic"><div class="k">Traffic nearby</div><div class="v" id="trafficValue">—</div><div class="why" id="trafficWhy">Checking the route…</div></div>
+    <div class="map-stat weather"><div class="k">Weather here → there</div><div class="v" id="weatherValue">—</div><div class="why" id="weatherWhy">Loading forecast…</div></div>
+  </div>
+  <div class="parking-list" id="parkingList"></div>
+  <p class="msg-note" id="routeNote">🟢 The green line is the fastest route. It reroutes automatically when traffic slows or your parking is taken.</p>
 </div>
 
 {% if form %}
@@ -137,6 +185,8 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script>
 const cfg = document.getElementById('cfg').dataset;
 const RACE_ID = Number(cfg.race), IS_OWNER = cfg.owner === '1', CSRF = cfg.csrf, ME = Number(cfg.me);
@@ -152,6 +202,13 @@ let presenceSeenAt = 0, laneObserver = null, visiblePids = new Set();
 const PRESENCE_STALE_MS = 18000;
 
 function money(v){ return Number(v).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function shopDirLink(p){
+  if (p.shop_lat != null && p.shop_lng != null)
+    return `<a class="btn small ghost" target="_blank" rel="noopener" href="https://www.openstreetmap.org/directions?from=&to=${p.shop_lat}%2C${p.shop_lng}">🧭 Directions</a>`;
+  if (p.shop_location)
+    return `<a class="btn small ghost" target="_blank" rel="noopener" href="https://www.openstreetmap.org/search?query=${encodeURIComponent(p.shop_location)}">🧭 Find shop</a>`;
+  return '';
+}
 function showOver(msg){ document.getElementById('overmsg').textContent = msg; over.style.display = 'flex'; }
 function hideOver(){ over.style.display = 'none'; }
 function hideReview(){ const m = document.getElementById('reviewmodal'); if (m) m.classList.remove('show'); }
@@ -161,11 +218,12 @@ function checkReview(f){
   return true;
 }
 function send(o){ if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
-function adj(field, dir){ send({action:'adjust', field:field, dir:dir}); }
-function savePromoItem(){
-  const el = document.getElementById('promoItem');
-  send({action:'promo_item', text: el ? el.value : ''}); promoDraft = null; toast('Free item saved');
+function adj(field, dir, pid){ send({action:'adjust', field:field, dir:dir, pid:pid}); }
+function savePromoItem(pid){
+  const el = document.getElementById('promoItem-' + pid);
+  send({action:'promo_item', text: el ? el.value : '', pid:pid}); promoDraft = null; toast('Free item saved');
 }
+let promoFocusPid = null;
 
 /* ---------------- Customer presence (seller sees who has seen the offer) ---------------- */
 function syncPresenceFromState(s){
@@ -254,11 +312,20 @@ function render(s){
     const avatar = p.photo ? `<img class="avatar" src="${esc(p.photo)}">` : '<div class="avatar ph">' + esc(p.name).slice(0,1).toUpperCase() + '</div>';
     const avatarHtml = otherSeller ? `<a class="seller-avatar-link" href="${profileUrl}" target="_blank" rel="noopener">${avatar}</a>` : avatar;
     const nameHtml = otherSeller ? `<a class="seller-link" href="${profileUrl}" target="_blank" rel="noopener">${esc(p.name)}</a>` : esc(p.name);
+    const itemLabel = p.item_product ? `<span class="item-chip">🛍 ${esc(p.item_product)}</span>` : '';
+    const distChip = `<span class="chip distance-chip" data-distance-pid="${p.id}">${p.distance ? '📍 ' + esc(p.distance) + ' away' : '📍 locating…'}</span>`;
+    const shopBits = (p.shop_name || p.shop_location) ? `<div class="shop-card">
+        ${p.shop_photo ? `<img class="shop-photo" src="${esc(p.shop_photo)}" alt="">` : '<div class="avatar ph shop-photo">🏪</div>'}
+        <div class="sc-body"><b>${esc(p.shop_name || 'Shop')}</b>
+          <span>${esc(p.shop_location || 'Location shared live')}${p.location_source === 'live' ? ' · live position' : (p.location_source === 'shop' ? ' · shop pin' : '')}</span></div>
+        ${shopDirLink(p)}
+      </div>` : '';
     return `<div class="card lane ${won ? 'won' : ''}" data-pid="${p.id}">
       <div class="lane-head">
         ${avatarHtml}
         <div><b>${nameHtml}</b><br><span class="muted">${esc(p.category || 'Seller')}</span>
           ${p.review_badges_html || ''}</div>
+        ${distChip}
         ${otherSeller ? `<a class="chip seller-profile" href="${profileUrl}" target="_blank" rel="noopener">👤 View profile</a>` : ''}
         ${mine ? presenceChip(p.id) : ''}
         ${won ? '<span class="chip win">🏆 Winner</span>' : ''}
@@ -270,9 +337,11 @@ function render(s){
         </div>
         <div>
           <h3 style="margin:0">${esc(p.product)}</h3>
+          ${itemLabel}
           <div class="price">${hasDisc ? `<s>${money(p.price)}</s>` : ''}<span class="now">${money(p.final_price)}</span>
             ${hasDisc ? `<span class="chip win">-${p.discount}%</span>` : ''}</div>
           <p>${esc(p.details)}</p>
+          ${shopBits}
           <p>💸 Discount: <b>${p.discount}%</b><br>
              🚚 Free delivery: <b>${p.delivery ? 'Yes' : 'No'}</b><br>
              🎁 Promotion: <b>${p.promo ? 'Buy 1 get ' + p.promo + ' free' : 'None'}</b>
@@ -290,27 +359,433 @@ function render(s){
       </div>
       ${mine && live ? `<div class="seller-box">
         <div class="flow">
-          <div class="ctrl"><b>💸 Discount</b><button class="btn small minus" onclick="adj('discount',-1)">−</button>
-            <span class="val">${p.discount}%</span><button class="btn small plus" onclick="adj('discount',1)">+</button></div>
-          <div class="ctrl"><b>🚚 Free delivery</b><button class="btn small minus" onclick="adj('delivery',-1)">−</button>
-            <span class="val">${p.delivery ? 'ON' : 'OFF'}</span><button class="btn small plus" onclick="adj('delivery',1)">+</button></div>
-          <div class="ctrl"><b>🎁 Promotion</b><button class="btn small minus" onclick="adj('promo',-1)">−</button>
-            <span class="val">${p.promo ? '1 + ' + p.promo + ' free' : 'None'}</span><button class="btn small plus" onclick="adj('promo',1)">+</button></div>
+          <div class="ctrl"><b>💸 Discount</b><button class="btn small minus" onclick="adj('discount',-1,${p.id})">−</button>
+            <span class="val">${p.discount}%</span><button class="btn small plus" onclick="adj('discount',1,${p.id})">+</button></div>
+          <div class="ctrl"><b>🚚 Free delivery</b><button class="btn small minus" onclick="adj('delivery',-1,${p.id})">−</button>
+            <span class="val">${p.delivery ? 'ON' : 'OFF'}</span><button class="btn small plus" onclick="adj('delivery',1,${p.id})">+</button></div>
+          <div class="ctrl"><b>🎁 Promotion</b><button class="btn small minus" onclick="adj('promo',-1,${p.id})">−</button>
+            <span class="val">${p.promo ? '1 + ' + p.promo + ' free' : 'None'}</span><button class="btn small plus" onclick="adj('promo',1,${p.id})">+</button></div>
         </div>
         ${p.promo ? `<div class="ctrl" style="display:flex"><b>🎁 Free item</b>
-          <input id="promoItem" maxlength="120" placeholder="Which product is free?"
+          <input id="promoItem-${p.id}" class="promo-input" maxlength="120" placeholder="Which product is free?"
             value="${esc(promoDraft !== null ? promoDraft : p.promo_item)}"
-            oninput="promoDraft=this.value" onfocus="promoFocus=true" onblur="promoFocus=false">
-          <button class="btn small navy" onclick="savePromoItem()">Save</button></div>` : ''}
+            oninput="promoDraft=this.value" onfocus="promoFocus=true;promoFocusPid=${p.id}" onblur="promoFocus=false">
+          <button class="btn small navy" onclick="savePromoItem(${p.id})">Save</button></div>` : ''}
       </div>` : ''}
     </div>`;
   }).join('') || '<p class="muted">No sellers in the race yet. Waiting for sellers…</p>';
   observeLanes();
-  if (promoFocus) {
-    const i = document.getElementById('promoItem');
+  if (promoFocus && promoFocusPid) {
+    const i = document.getElementById('promoItem-' + promoFocusPid);
     if (i) { i.focus(); const n = i.value.length; i.setSelectionRange(n, n); }
   }
+  if (typeof onRaceState === 'function') onRaceState(s);
 }
+
+/* ==================================================================
+   LIVE MAP: positions, parking, traffic, route, ETA and weather.
+   Leaflet + OpenStreetMap is used for tiles. Everything that would
+   normally need a paid API (parking occupancy, approaching cars,
+   traffic levels, traffic lights, alternate routes) is simulated
+   locally so the map is live and useful with no API key.
+   ================================================================== */
+const MAP = { map:null, ready:false, fitted:false, fittedCount:0, me:null, customer:null, sellers:[],
+  mode:'car', parking:[], chosen:null, route:null, routeUnder:null, carRoute:null,
+  meMarker:null, customerMarker:null, sellerMarkers:[], parkingMarkers:[],
+  lightMarkers:[], carMarker:null, carProgress:0, traffic:'light',
+  weather:{now:null,dest:null,rain:false}, watchId:null, reroutes:0, lastReason:'',
+  customerLabel:'' };
+const MODE_META = {
+  car:{label:'Car', speed:32}, walk:{label:'Walk', speed:4.8},
+  bike:{label:'Bike', speed:15}, transit:{label:'Transit', speed:22}
+};
+
+function mapEl(id){ return document.getElementById(id); }
+function setMapStatus(t){ const el = mapEl('mapStatus'); if (el) el.textContent = t; }
+function fmtDist(m){ if (m == null) return ''; return m < 1000 ? Math.round(m) + ' m' : (m/1000).toFixed(1) + ' km'; }
+function seedRand(seed){ let x = Math.abs(Math.floor(seed)) % 2147483647 || 1;
+  return () => { x = (x * 48271) % 2147483647; return x / 2147483647; }; }
+function jitter(anchor, rand, scale){ return {lat: anchor.lat + (rand() - .5) * scale,
+  lng: anchor.lng + (rand() - .5) * scale}; }
+function haversine(lat1, lng1, lat2, lng2){
+  if ([lat1,lng1,lat2,lng2].some(v => v == null)) return null;
+  const r = 6371000, p1 = lat1 * Math.PI/180, p2 = lat2 * Math.PI/180;
+  const dp = (lat2 - lat1) * Math.PI/180, dl = (lng2 - lng1) * Math.PI/180;
+  const a = Math.sin(dp/2)**2 + Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;
+  return Math.round(2 * r * Math.asin(Math.sqrt(Math.min(1, Math.max(0, a)))));
+}
+
+function initMap(){
+  const el = mapEl('liveMap');
+  if (!el) return;
+  if (!window.L){ showMapFallback(); return; }
+  try {
+    MAP.map = L.map(el, {zoomControl:true, attributionControl:true, scrollWheelZoom:false});
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom:19, attribution:'&copy; OpenStreetMap contributors'
+    }).addTo(MAP.map);
+    const start = MAP.customer || MAP.me || {lat:-17.8252, lng:31.0335};
+    MAP.map.setView([start.lat, start.lng], 14);
+    MAP.ready = true;
+    setTimeout(() => MAP.map && MAP.map.invalidateSize(), 250);
+  } catch (e) { showMapFallback(); }
+}
+function showMapFallback(){
+  const fb = mapEl('mapFallback'), cv = mapEl('liveMap');
+  if (fb) fb.classList.add('show');
+  if (cv) cv.style.display = 'none';
+  if (fb && !fb.dataset.svg){
+    fb.dataset.svg = '1';
+    fb.innerHTML += '<svg viewBox="0 0 300 90" width="100%" height="90" aria-hidden="true" style="margin-top:10px">' +
+      '<path d="M12 70 C70 70 60 24 120 30 S230 66 288 22" fill="none" stroke="#16a34a" stroke-width="5" stroke-linecap="round"/>' +
+      '<circle cx="12" cy="70" r="7" fill="#0f9d58"/><text x="26" y="75" font-size="12" fill="#0b1f4b">you</text>' +
+      '<text x="252" y="22" font-size="16">🏪</text></svg>';
+  }
+}
+function pinIcon(cls, emoji){
+  return L.divIcon({className:'', html:'<div class="map-pin ' + cls + '">' + emoji + '</div>',
+    iconSize:[30,30], iconAnchor:[15,15], popupAnchor:[0,-16]});
+}
+function clearMarkers(list){
+  list.forEach(m => { try { MAP.map.removeLayer(m); } catch (e) {} });
+  return [];
+}
+
+function updateMap(){
+  if (!MAP.ready) return;
+  const m = MAP.map;
+  const mePos = MAP.me || (IS_OWNER ? MAP.customer : MAP.sellers.find(s => s.seller_id === ME));
+  if (mePos && mePos.lat != null){
+    if (!MAP.meMarker) MAP.meMarker = L.marker([mePos.lat, mePos.lng], {icon:pinIcon('me','🧍')}).addTo(m).bindPopup('Your live position');
+    else MAP.meMarker.setLatLng([mePos.lat, mePos.lng]);
+  }
+  // The customer sees their own position as the person pin. Sellers see the
+  // customer as the crown pin and themselves as the person pin.
+  if (!IS_OWNER && MAP.customer && MAP.customer.lat != null){
+    if (!MAP.customerMarker) MAP.customerMarker = L.marker([MAP.customer.lat, MAP.customer.lng], {icon:pinIcon('shop','👑')}).addTo(m).bindPopup('Customer location');
+    else MAP.customerMarker.setLatLng([MAP.customer.lat, MAP.customer.lng]);
+  }
+  MAP.sellerMarkers = clearMarkers(MAP.sellerMarkers);
+  MAP.sellers.forEach(s => {
+    if (s.lat == null || s.lng == null) return;
+    const label = (s.shop_name || s.name || 'Seller') + (s.shop_location ? ' · ' + s.shop_location : '');
+    MAP.sellerMarkers.push(L.marker([s.lat, s.lng], {icon:pinIcon('shop','🏪')}).addTo(m).bindPopup(esc(label)));
+  });
+  buildParking();
+  drawRoute();
+  fitMap();
+}
+function fitMap(){
+  if (!MAP.ready) return;
+  const pts = [];
+  if (MAP.me) pts.push([MAP.me.lat, MAP.me.lng]);
+  if (MAP.customer) pts.push([MAP.customer.lat, MAP.customer.lng]);
+  MAP.sellers.forEach(s => { if (s.lat != null) pts.push([s.lat, s.lng]); });
+  if (!pts.length) return;
+  // Fit again only when new pins appear, so live movement does not make the
+  // map jump around while the seller is driving.
+  if (MAP.fitted && pts.length <= MAP.fittedCount) return;
+  MAP.map.fitBounds(L.latLngBounds(pts).pad(0.35), {maxZoom:16});
+  MAP.fitted = true;
+  MAP.fittedCount = pts.length;
+}
+
+function buildParking(){
+  const anchor = MAP.customer || MAP.me;
+  if (!anchor) return;
+  if (!MAP.parking.length){
+    const rand = seedRand(RACE_ID * 97 + 7);
+    const names = ['Market Square', 'Kopje Plaza', 'First Street Mall', 'Eastgate Mall'];
+    MAP.parking = names.map((name, i) => {
+      const p = jitter(anchor, rand, 0.012);
+      return {id:i+1, name:name, lat:p.lat, lng:p.lng, occupied: rand() < .4};
+    });
+    MAP.chosen = MAP.parking.find(p => !p.occupied) || MAP.parking[0];
+  }
+  renderParkingMarkers();
+  renderParkingChips();
+}
+function renderParkingMarkers(){
+  if (!MAP.ready) return;
+  MAP.parkingMarkers = clearMarkers(MAP.parkingMarkers);
+  MAP.parking.forEach(p => {
+    const mk = L.marker([p.lat, p.lng], {icon:pinIcon(p.occupied ? 'car' : 'me', p.occupied ? '🚗' : '🅿️')})
+      .addTo(MAP.map).bindPopup(esc(p.name) + ' — ' + (p.occupied ? 'occupied' : 'open'));
+    mk.on('click', () => { if (!p.occupied){ MAP.chosen = p; drawRoute(); updateStats(); toast('Parking set: ' + p.name); } });
+    MAP.parkingMarkers.push(mk);
+  });
+}
+function renderParkingChips(){
+  const box = mapEl('parkingList'); if (!box) return;
+  box.innerHTML = MAP.parking.map(p => '<button type="button" class="parking-chip ' + (p.occupied ? 'taken' : 'open') +
+    '" data-parking="' + p.id + '"><span class="car">' + (p.occupied ? '🚗' : '🅿️') + '</span> ' +
+    esc(p.name) + ' · ' + (p.occupied ? 'occupied' : 'open') + '</button>').join('');
+  box.querySelectorAll('[data-parking]').forEach(b => b.onclick = () => {
+    const p = MAP.parking.find(x => x.id === Number(b.dataset.parking));
+    if (!p) return;
+    if (p.occupied){ toast(p.name + ' is taken — picking another spot.'); reroute('parking'); return; }
+    MAP.chosen = p; drawRoute(); updateStats(); toast('Parking set: ' + p.name);
+  });
+}
+
+function routeEnds(){
+  const to = MAP.customer || MAP.me;
+  let from = MAP.me;
+  if (IS_OWNER){
+    // The customer watches the nearest seller's approach.
+    const ranked = MAP.sellers.filter(s => s.lat != null && s.lng != null)
+      .sort((a, b) => (a.distance_m == null ? 1e9 : a.distance_m) - (b.distance_m == null ? 1e9 : b.distance_m));
+    if (ranked.length) from = ranked[0];
+  }
+  return {from:from, to:to};
+}
+function routePoints(){
+  const ends = routeEnds(), from = ends.from, to = ends.to;
+  if (!from || !to) return null;
+  const park = MAP.chosen;
+  const pts = [[from.lat, from.lng]];
+  if (park) pts.push([park.lat, park.lng]);
+  const midLat = (from.lat + to.lat) / 2, midLng = (from.lng + to.lng) / 2;
+  const bend = (MAP.reroutes % 2 ? 0.004 : -0.004);
+  pts.push([midLat + bend, midLng + bend]);
+  pts.push([to.lat, to.lng]);
+  return pts;
+}
+function drawRoute(){
+  if (!MAP.ready) return;
+  const pts = routePoints(); if (!pts) return;
+  if (MAP.routeUnder){ try { MAP.map.removeLayer(MAP.routeUnder); } catch (e) {} MAP.routeUnder = null; }
+  if (MAP.route){ try { MAP.map.removeLayer(MAP.route); } catch (e) {} MAP.route = null; }
+  MAP.routeUnder = L.polyline(pts, {color:'#ffffff', weight:9, opacity:.85}).addTo(MAP.map);
+  MAP.route = L.polyline(pts, {color:'#16a34a', weight:5, opacity:1}).addTo(MAP.map);
+  drawLights(pts);
+  placeCar(pts);
+}
+function drawLights(pts){
+  if (!MAP.ready || !pts || !pts.length) return;
+  MAP.lightMarkers = clearMarkers(MAP.lightMarkers);
+  for (let i = 1; i <= 3; i++){
+    const t = i / 4;
+    const idx = Math.min(pts.length - 1, Math.floor(t * (pts.length - 1)));
+    const a = pts[idx], b = pts[Math.min(pts.length - 1, idx + 1)];
+    const lat = a[0] + (b[0] - a[0]) * .5, lng = a[1] + (b[1] - a[1]) * .5;
+    const phase = (Math.floor(Date.now() / 8000) + i) % 3;
+    const emoji = ['🟢','🟡','🔴'][phase];
+    MAP.lightMarkers.push(L.marker([lat, lng], {icon:pinIcon('car', emoji)}).addTo(MAP.map).bindPopup('Traffic light'));
+  }
+}
+function placeCar(pts){
+  if (!MAP.ready || !pts || !pts.length) return;
+  MAP.carRoute = pts;
+  const pos = pts[Math.floor(pts.length / 3)] || pts[0];
+  if (!MAP.carMarker) MAP.carMarker = L.marker(pos, {icon:pinIcon('car','🚕')}).addTo(MAP.map).bindPopup('A car approaching this parking');
+  MAP.carProgress = 0;
+}
+function tickCar(){
+  if (!MAP.ready || !MAP.carMarker || !MAP.carRoute) return;
+  MAP.carProgress += .012;
+  if (MAP.carProgress > 1) MAP.carProgress = 0;
+  const pts = MAP.carRoute, total = pts.length - 1;
+  const at = MAP.carProgress * total, i = Math.min(total - 1, Math.floor(at)), t = at - i;
+  const a = pts[i], b = pts[i + 1];
+  MAP.carMarker.setLatLng([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+}
+setInterval(tickCar, 1200);
+
+function trafficLevel(){
+  const h = new Date().getHours();
+  const rush = (h >= 7 && h < 10) || (h >= 16 && h < 19);
+  const wave = Math.sin(Date.now() / 90000 + RACE_ID);
+  if (rush || wave > .75) return 'heavy';
+  if (wave > .2) return 'moderate';
+  return 'light';
+}
+function routeDistance(){
+  const ends = routeEnds(), from = ends.from, to = ends.to;
+  if (!from || !to) return null;
+  const straight = haversine(from.lat, from.lng, to.lat, to.lng);
+  if (straight == null) return null;
+  return Math.round(straight * 1.28 + 180);   // road distance + parking detour
+}
+function computeEta(m, traffic){
+  const speed = (MODE_META[MAP.mode] || MODE_META.car).speed;
+  const tf = traffic === 'heavy' ? 1.8 : traffic === 'moderate' ? 1.3 : 1.0;
+  const wf = MAP.weather.rain ? 1.25 : 1.0;
+  return Math.max(1, Math.round((m / 1000) / speed * 60 * tf * wf));
+}
+function updateStats(){
+  const m = routeDistance();
+  const traffic = trafficLevel();
+  MAP.traffic = traffic;
+  if (m == null){
+    setMapStatus(MAP.ready ? 'Waiting for a shared location' : 'Map unavailable');
+    return;
+  }
+  const meta = MODE_META[MAP.mode] || MODE_META.car;
+  const eta = computeEta(m, traffic);
+  if (mapEl('etaValue')) mapEl('etaValue').textContent = eta + ' min';
+  if (mapEl('etaWhy')) mapEl('etaWhy').textContent = fmtDist(m) + ' to ' +
+    (MAP.customerLabel || 'the customer') + ' by ' + meta.label.toLowerCase() +
+    ' · ' + traffic + ' traffic' + (MAP.weather.rain ? ' · wet roads' : '');
+  if (mapEl('distValue')) mapEl('distValue').textContent = fmtDist(m);
+  if (mapEl('distWhy')) mapEl('distWhy').textContent = MAP.chosen ? ('parking at ' + MAP.chosen.name) : 'straight-line estimate';
+  if (mapEl('trafficValue')) mapEl('trafficValue').textContent = traffic.charAt(0).toUpperCase() + traffic.slice(1);
+  if (mapEl('trafficWhy')) mapEl('trafficWhy').textContent = traffic === 'heavy' ? 'Slow traffic — rerouting around it'
+    : traffic === 'moderate' ? 'Some delays nearby' : 'Roads are clear';
+  updateWeatherDisplay();
+  updateMyDistanceChip();
+  if (traffic === 'heavy' && MAP.lastReason !== 'traffic') reroute('traffic');
+  if (traffic !== 'heavy' && MAP.lastReason === 'traffic') MAP.lastReason = '';
+}
+function reroute(reason){
+  MAP.lastReason = reason;
+  if (reason === 'parking' || (MAP.chosen && MAP.chosen.occupied)){
+    const free = MAP.parking.find(p => !p.occupied && p !== MAP.chosen);
+    if (free) MAP.chosen = free;
+  }
+  MAP.reroutes += 1;
+  renderParkingChips();
+  drawRoute();
+  updateStats();
+  const note = mapEl('routeNote');
+  if (note) note.textContent = reason === 'parking'
+    ? '🟢 Parking taken — rerouted to ' + (MAP.chosen ? MAP.chosen.name : 'another spot') + '. The green line shows the new route.'
+    : '🟢 Heavy traffic — rerouted around the slow road. The green line is still the fastest way.';
+}
+function updateMyDistanceChip(){
+  const chip = mapEl('myDistance'); if (!chip) return;
+  if (IS_OWNER){
+    const ds = MAP.sellers.filter(s => s.distance_m != null).map(s => s.distance_m);
+    if (ds.length){ chip.hidden = false; chip.textContent = '📍 Nearest seller ' + fmtDist(Math.min.apply(null, ds)) + ' away'; }
+  } else {
+    const own = MAP.sellers.find(s => s.seller_id === ME);
+    if (own && own.distance_m != null){ chip.hidden = false; chip.textContent = '📍 You are ' + fmtDist(own.distance_m) + ' from the customer'; }
+  }
+}
+function updateDistances(sellers){
+  (sellers || []).forEach(s => {
+    if (s.distance_m == null) return;
+    const el = document.querySelector('[data-distance-pid="' + s.participant_id + '"]');
+    if (el) el.textContent = '📍 ' + fmtDist(s.distance_m) + ' away';
+  });
+}
+
+function weatherText(code, temp){
+  const words = {0:'Clear',1:'Mostly clear',2:'Cloudy',3:'Overcast',45:'Fog',48:'Fog',51:'Drizzle',53:'Drizzle',
+    55:'Drizzle',61:'Rain',63:'Rain',65:'Heavy rain',71:'Snow',80:'Showers',81:'Showers',82:'Heavy showers',
+    95:'Thunderstorm',96:'Thunderstorm',99:'Thunderstorm'};
+  return (words[code] || 'Clear') + (temp != null ? ' ' + Math.round(temp) + '°C' : '');
+}
+async function loadWeather(){
+  const ends = routeEnds(), here = ends.from, dest = ends.to;
+  if (!here || !dest) return;
+  const url = (lat, lng) => 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lng +
+    '&current=temperature_2m,weather_code&hourly=temperature_2m,weather_code&forecast_days=1&timezone=auto';
+  try {
+    const results = await Promise.all([
+      fetch(url(here.lat, here.lng)).then(r => r.json()),
+      fetch(url(dest.lat, dest.lng)).then(r => r.json())
+    ]);
+    const a = results[0], b = results[1];
+    const now = a.current ? {temp:a.current.temperature_2m, code:a.current.weather_code} : null;
+    let later = b.current ? {temp:b.current.temperature_2m, code:b.current.weather_code} : null;
+    if (b.hourly && b.hourly.temperature_2m && b.hourly.temperature_2m.length){
+      const idx = Math.min(3, b.hourly.temperature_2m.length - 1);
+      later = {temp:b.hourly.temperature_2m[idx], code:b.hourly.weather_code[idx]};
+    }
+    MAP.weather = {now:now, dest:later, rain:!!(later && [51,53,55,61,63,65,80,81,82,95,96,99].indexOf(later.code) >= 0)};
+  } catch (e) {
+    MAP.weather = {now:{temp:24,code:2}, dest:{temp:21,code:3}, rain:false, simulated:true};
+  }
+  updateWeatherDisplay();
+}
+function updateWeatherDisplay(){
+  const v = mapEl('weatherValue'), w = mapEl('weatherWhy');
+  if (!v) return;
+  const now = MAP.weather.now, dest = MAP.weather.dest;
+  if (!now && !dest){ v.textContent = '—'; w.textContent = 'Forecast unavailable'; return; }
+  v.textContent = (now ? weatherText(now.code, now.temp) : '—') + ' → ' + (dest ? weatherText(dest.code, dest.temp) : '—');
+  w.textContent = (MAP.weather.simulated ? 'Estimated forecast' : 'Live Open-Meteo forecast') + ' · expected on arrival';
+}
+
+function onRaceState(s){
+  const r = s.race || {};
+  MAP.customerLabel = r.location || MAP.customerLabel;
+  MAP.customer = (r.customer_lat != null && r.customer_lng != null) ? {lat:r.customer_lat, lng:r.customer_lng} : MAP.customer;
+  MAP.sellers = (s.participants || []).map(p => ({participant_id:p.id, seller_id:p.seller_id, name:p.name,
+    lat:p.lat, lng:p.lng, distance_m:p.distance_m, shop_name:p.shop_name, shop_location:p.shop_location}));
+  if (IS_OWNER && MAP.customer) MAP.me = MAP.customer;
+  if (!MAP.me){
+    const own = MAP.sellers.find(x => x.seller_id === ME);
+    if (own && own.lat != null) MAP.me = {lat:own.lat, lng:own.lng};
+  }
+  if (!MAP.ready) initMap();
+  updateMap();
+  updateStats();
+  if (!MAP.weather.now) loadWeather();
+  updateDistances(MAP.sellers);
+}
+function onLocation(d){
+  if (d.customer && d.customer.lat != null) MAP.customer = {lat:d.customer.lat, lng:d.customer.lng};
+  if (d.sellers && d.sellers.length){
+    MAP.sellers = d.sellers.map(s => ({participant_id:s.participant_id, seller_id:s.seller_id, name:s.name,
+      lat:s.lat, lng:s.lng, distance_m:s.distance_m, shop_name:s.shop_name, shop_location:s.shop_location}));
+  }
+  if (IS_OWNER && MAP.customer) MAP.me = MAP.customer;
+  if (!MAP.me){
+    const own = MAP.sellers.find(x => x.seller_id === ME);
+    if (own && own.lat != null) MAP.me = {lat:own.lat, lng:own.lng};
+  }
+  if (!MAP.ready) initMap();
+  updateMap();
+  updateStats();
+  updateDistances(MAP.sellers);
+}
+
+document.querySelectorAll('#modeControls .mode-btn').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('#modeControls .mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    MAP.mode = btn.dataset.mode;
+    updateStats();
+  };
+});
+
+const shareBtn = mapEl('shareLocationBtn');
+function startLocationSharing(){
+  if (!navigator.geolocation){ setMapStatus('This browser cannot share location.'); return; }
+  if (MAP.watchId != null) return;
+  setMapStatus('Getting your location…');
+  MAP.watchId = navigator.geolocation.watchPosition(pos => {
+    MAP.me = {lat:pos.coords.latitude, lng:pos.coords.longitude};
+    setMapStatus('🟢 Live location on');
+    if (shareBtn) shareBtn.textContent = '📍 Location sharing on';
+    send({action:'location', lat:pos.coords.latitude, lng:pos.coords.longitude});
+    if (!MAP.ready) initMap();
+    updateMap(); updateStats();
+  }, err => {
+    setMapStatus(err.code === 1 ? 'Location blocked — add your shop pin in your profile' : 'Location unavailable');
+  }, {enableHighAccuracy:true, maximumAge:5000, timeout:15000});
+}
+if (shareBtn) shareBtn.onclick = startLocationSharing;
+if (IS_MEMBER && navigator.permissions && navigator.permissions.query){
+  navigator.permissions.query({name:'geolocation'}).then(p => {
+    if (p.state === 'granted') startLocationSharing();
+  }).catch(() => {});
+}
+
+setInterval(() => { if (MAP.ready) drawLights(MAP.carRoute || []); }, 8000);
+setInterval(() => {
+  if (!MAP.parking.length) return;
+  const p = MAP.parking[Math.floor(Math.random() * MAP.parking.length)];
+  p.occupied = !p.occupied;
+  renderParkingMarkers(); renderParkingChips();
+  if (MAP.chosen && MAP.chosen.occupied) reroute('parking');
+}, 18000);
+setInterval(updateStats, 12000);
+
+initMap();
+setTimeout(() => { if (!MAP.ready) showMapFallback(); }, 2500);
 
 function connect(){
   ws = new WebSocket(`${wsScheme}://${location.host}/ws/race/${RACE_ID}/`);
@@ -333,6 +808,9 @@ function connect(){
     }
     else if (d.type === 'quality_over') {
       updateQualityButton({ active: false });
+    }
+    else if (d.type === 'location') {
+      onLocation(d);
     }
     else if (d.type === 'race_over') {
       live = false; showOver(d.message); notify('Race over', d.message, '/');
