@@ -369,55 +369,6 @@
    padding:1px 8px;font-size:.72rem;font-weight:900;line-height:1.4}
  .tabbar a.active .tab-count,.tabbar button.active .tab-count{background:rgba(255,255,255,.22);color:#ffffff}
 
- /* ------------------------------- Seller directory ------------------------------- */
- .seller-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:16px}
- .seller-card{position:relative;display:flex;flex-direction:column;text-align:left;padding:0;
-   background:#ffffff;border:1px solid var(--border);border-radius:20px;overflow:hidden;
-   box-shadow:var(--shadow-sm);text-decoration:none;color:inherit;
-   transition:transform .18s,box-shadow .18s,border-color .18s}
- .seller-card:hover{transform:translateY(-4px);box-shadow:var(--shadow-lg);border-color:#bfd2f5}
- .seller-card:before{display:none}
- .seller-card .sc-cover{position:relative;display:block;height:88px;
-   background:linear-gradient(135deg,#0e1f42 0%,#1d4ed8 58%,#2563eb 100%)}
- .seller-card:nth-child(3n+2) .sc-cover{background:linear-gradient(135deg,#0b3b47 0%,#0e7490 58%,#0891b2 100%)}
- .seller-card:nth-child(3n+3) .sc-cover{background:linear-gradient(135deg,#241a56 0%,#4338ca 58%,#6366f1 100%)}
- .seller-card .sc-cover:after{content:"";position:absolute;inset:0;
-   background:radial-gradient(130px 90px at 88% -20%,rgba(255,255,255,.38),rgba(255,255,255,0) 70%)}
- .seller-card .sc-cover:before{content:"";position:absolute;right:-18px;bottom:-42px;width:110px;height:110px;
-   border-radius:50%;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16)}
- .seller-card .sc-ribbon{position:absolute;top:10px;right:10px;z-index:1;display:inline-flex;align-items:center;gap:5px;
-   background:rgba(255,255,255,.94);color:#0e1f42;border-radius:999px;padding:4px 10px;
-   font-size:.7rem;font-weight:900;letter-spacing:.02em;box-shadow:0 3px 10px rgba(0,0,0,.16)}
- .seller-card .sc-ribbon.pick{background:#fff1f4;color:#b00320}
- .seller-card .sc-avatar{position:absolute;left:16px;bottom:-28px;z-index:2;display:block}
- .seller-card .sc-avatar .avatar{width:64px;height:64px;border:3px solid #ffffff;
-   box-shadow:0 6px 16px rgba(11,23,48,.2);background:#eef3ff}
- .seller-card .sc-avatar .ph{display:flex;align-items:center;justify-content:center;font-size:1.5rem;
-   color:var(--accent-dark);font-weight:900}
- .seller-card .sc-live{position:absolute;right:8px;bottom:8px;width:14px;height:14px;border-radius:50%;
-   background:var(--green);border:2.5px solid #ffffff;box-shadow:0 0 0 3px rgba(15,157,88,.18)}
- .seller-card .sc-body{display:flex;flex-direction:column;gap:6px;padding:38px 16px 16px;flex:1}
- .seller-card .nm{font-weight:900;font-size:1.06rem;color:var(--ink);max-width:100%;
-   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
- .seller-card .cat{display:inline-flex;align-items:center;gap:4px;align-self:flex-start;max-width:100%;
-   font-size:.72rem;font-weight:800;color:#44557a;background:#f1f5fd;
-   border:1px solid #dde6f6;border-radius:999px;padding:3px 9px;
-   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
- .seller-card .sc-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:22px}
- .seller-card .wins{font-size:.72rem;color:#0f6b3d;font-weight:800;background:#e8f8ee;
-   border:1px solid #b9e6ca;border-radius:999px;padding:2px 8px}
- .seller-card .sc-trust{font-size:.72rem;color:#8a5a00;font-weight:800;background:#fffaeb;
-   border:1px solid #f4e3b0;border-radius:999px;padding:2px 8px}
- .seller-card .review-badges{justify-content:flex-start;margin-top:0;gap:5px}
- .seller-card .review-badge{font-size:.68rem;padding:1px 7px 1px 3px}
- .seller-card .review-badge .icon3d{width:15px;height:15px}
- .seller-card .sc-cta{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;
-   margin-top:auto;padding-top:10px;border-top:1px solid #edf1f9;
-   color:var(--accent-dark);font-weight:900;font-size:.84rem}
- .seller-card .sc-cta .arrow{transition:transform .18s}
- .seller-card:hover .sc-cta .arrow{transform:translateX(3px)}
- .seller-card.featured{border-color:#c7d6f6;box-shadow:0 10px 28px rgba(37,99,235,.13)}
-
  .badge{border-radius:999px}
  .review-badge{background:#ffffff;box-shadow:0 1px 3px rgba(11,23,48,.07)}
  .mini-circle,.circle-panel,.empty,.hall-scroll .hall-card,.deal,.post-card{
@@ -469,9 +420,6 @@
    border-radius:12px}
  .dot{background-color:var(--green)}
 
- @media (max-width:640px){
-   .seller-grid{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
- }
  @media (max-width:560px){
    nav{padding:0 10px}
    .modebar-label,.modebar-note{display:none}

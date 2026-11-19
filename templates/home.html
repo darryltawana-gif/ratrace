@@ -328,27 +328,15 @@
 {% if sellers %}
 <div class="seller-grid">
   {% for s in sellers %}
-  <a class="seller-card{% if forloop.first %} featured{% endif %}" href="{% url 'seller_public' s.user.id %}">
-    <span class="sc-cover" aria-hidden="true">
-      {% if forloop.first %}<span class="sc-ribbon pick">⭐ Top pick</span>
-      {% elif s.wins %}<span class="sc-ribbon">🏆 {{ s.wins }} win{{ s.wins|pluralize }}</span>{% endif %}
-      <span class="sc-live" title="Available now"></span>
-    </span>
-    <span class="sc-avatar">
-      {% if s.photo %}<img class="avatar" src="{{ s.photo.url }}" alt="{{ s.user.username }}">
-      {% else %}<span class="avatar ph">{{ s.user.username|slice:":1"|upper }}</span>{% endif %}
-    </span>
-    <span class="sc-body">
-      <span class="nm">{{ s.user.username }}</span>
-      {% if s.shop_name %}<span class="cat">🏪 {{ s.shop_name }}</span>
-      {% elif s.category_label %}<span class="cat">{{ s.category_label }}</span>{% endif %}
-      <span class="sc-meta">
-        {% if s.wins %}<span class="wins">🏆 {{ s.wins }} win{{ s.wins|pluralize }}</span>{% endif %}
-        {% if s.hall_of_fame %}<span class="sc-trust">✓ Hall of Fame</span>{% endif %}
-      </span>
-      {% include "includes/review_badges.html" with badges=s.review_badges compact=1 limit=2 %}
-      <span class="sc-cta">Visit shop <span class="arrow" aria-hidden="true">→</span></span>
-    </span>
+  <a class="seller-card" href="{% url 'seller_public' s.user.id %}">
+    {% if s.photo %}<img class="avatar" src="{{ s.photo.url }}" alt="{{ s.user.username }}">
+    {% else %}<div class="avatar ph" style="width:64px;height:64px;font-size:1.5rem">{{ s.user.username|slice:":1"|upper }}</div>{% endif %}
+    <span class="nm">{{ s.user.username }}</span>
+    {% if s.shop_name %}<span class="cat">🏪 {{ s.shop_name }}</span>
+    {% elif s.category_label %}<span class="cat">{{ s.category_label }}</span>{% endif %}
+    {% include "includes/review_badges.html" with badges=s.review_badges compact=1 limit=2 %}
+    {% include "includes/badge.html" with badge=s.badge %}
+    {% if s.wins %}<span class="wins">🏆 {{ s.wins }} win{{ s.wins|pluralize }}</span>{% endif %}
   </a>
   {% endfor %}
 </div>
