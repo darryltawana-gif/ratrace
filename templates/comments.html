@@ -1,7 +1,97 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="card narrow">
-  <h2>💬 Tell the creators what you think</h2>
-  <form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn" style="width:100%;margin-top:8px">Send comment</button></form>
+<style>
+ .comment-form .field{margin-bottom:14px}
+ .comment-form .field:last-of-type{margin-bottom:10px}
+ .comment-form label{display:block;margin-bottom:6px;font-size:.86rem;font-weight:800}
+ .comment-form input,.comment-form textarea{width:100%}
+ .comment-form textarea{min-height:150px;resize:vertical}
+ .comment-form .err{color:#b30322;font-size:.8rem;font-weight:700;margin-top:4px}
+ .comment-form .help{font-size:.78rem;color:var(--muted);margin-top:4px}
+ .comment-list{max-height:560px;overflow:auto;padding-right:4px}
+ .comment-empty{display:flex;gap:12px;align-items:center;background:#f8faff;border:1px dashed #cfdbf3;
+   border-radius:14px;padding:18px;color:var(--muted);font-weight:600}
+ .comment-empty .em{font-size:1.6rem}
+ .comment-grid > div{scroll-margin-top:130px}
+ @media (max-width:560px){.comment-list{max-height:none;overflow:visible}}
+</style>
+
+<div class="page-hero">
+  <span class="eyebrow">💬 We are listening</span>
+  <h1>Tell the creators what you think</h1>
+  <p>Ideas, bugs, praise or a feature you wish existed — every note helps shape the next version of Rat Race.</p>
+  <div class="hero-actions">
+    <span class="hero-stat"><b>{{ items|length }}</b> recent comment{{ items|length|pluralize }}</span>
+    <span class="hero-stat">🛡 Your name is shown with your note</span>
+  </div>
+</div>
+
+<div class="tabbar" aria-label="Comments sections">
+  <a href="#write" class="active">✍️ Write a comment</a>
+  <a href="#guidelines">📝 Guidelines</a>
+  <a href="#recent">💬 Recent comments <span class="tab-count">{{ items|length }}</span></a>
+</div>
+
+<div class="comment-grid">
+  <div class="card" id="write" style="margin-top:0">
+    <div class="section-head" style="margin-top:0"><h2>Send a comment</h2></div>
+    <p class="muted" style="margin-top:0">Keep it clear and kind. If you are reporting a problem, tell us what you were doing when it happened.</p>
+    <form method="post" class="comment-form">
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="msg error">{{ form.non_field_errors }}</div>{% endif %}
+      <div class="field">
+        <label for="{{ form.name.id_for_label }}">Your name</label>
+        {{ form.name }}
+        {% if form.name.errors %}<div class="err">{{ form.name.errors|join:", " }}</div>{% endif %}
+      </div>
+      <div class="field">
+        <label for="{{ form.message.id_for_label }}">Your comment</label>
+        {{ form.message }}
+        {% if form.message.errors %}<div class="err">{{ form.message.errors|join:", " }}</div>{% endif %}
+        <div class="help">Be specific — it helps us fix the right thing.</div>
+      </div>
+      <button class="btn accent" style="width:100%">Send comment →</button>
+    </form>
+  </div>
+
+  <div>
+    <div class="card" id="guidelines" style="margin-top:0">
+      <div class="section-head" style="margin-top:0"><h2>How to write a useful note</h2></div>
+      <div class="guideline">
+        <span class="g-icon">🎯</span>
+        <div><b>Be specific</b><span>Name the page or race step where something happened.</span></div>
+      </div>
+      <div class="guideline">
+        <span class="g-icon">🧭</span>
+        <div><b>Say what you expected</b><span>Tell us what you thought would happen, and what actually happened.</span></div>
+      </div>
+      <div class="guideline">
+        <span class="g-icon">🤝</span>
+        <div><b>Keep it respectful</b><span>Critique the experience, never the person. Sellers and customers share this space.</span></div>
+      </div>
+      <div class="guideline">
+        <span class="g-icon">🔒</span>
+        <div><b>Never post private details</b><span>Do not include passwords, phone numbers, or full addresses.</span></div>
+      </div>
+    </div>
+
+    <div class="card" id="recent">
+      <div class="section-head" style="margin-top:0"><h2>Recent comments</h2></div>
+      <div class="comment-list">
+        {% for c in items %}
+        <div class="comment-item">
+          <div class="avatar ph">{{ c.name|slice:":1"|upper }}</div>
+          <div class="ci-body">
+            <b>{{ c.name }}</b>
+            <div class="when">{{ c.created|date:"d M Y, H:i" }}</div>
+            <p>{{ c.message|linebreaksbr }}</p>
+          </div>
+        </div>
+        {% empty %}
+        <div class="comment-empty"><span class="em">🌱</span><span>No comments yet. Yours will be the first.</span></div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}

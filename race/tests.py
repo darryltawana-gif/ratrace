@@ -43,7 +43,7 @@ class HomePageTests(TestCase):
         self.assertContains(response, "Hall of Fame")
         self.assertContains(response, "My Circle")
         self.assertNotContains(response, "My Posts")
-        self.assertContains(response, "#f2c200")
+        self.assertContains(response, "#2563eb")
         self.assertNotContains(response, "#8ff0c4")
 
     def test_customer_home_renders(self):
@@ -564,18 +564,17 @@ class LiveLocationTests(TestCase):
         self.assertIsNone(sv.update_location(stranger, self.race.id, -17.8, 31.0))
         self.assertIsNone(sv.update_location(self.seller, self.race.id, "not-a-number", "x"))
 
-    def test_race_room_shows_map_items_distance_and_shop(self):
+    def test_race_room_shows_items_and_shop_without_a_map(self):
         sv.update_location(self.customer, self.race.id, -17.8252, 31.0335)
         self.client.force_login(self.customer)
         response = self.client.get(f"/race/{self.race.id}/")
         self.assertEqual(response.status_code, 200)
         body = response.content.decode()
-        self.assertIn("Live map", body)
+        # The live map was removed; race details and the shop card remain.
+        self.assertNotIn("Live map", body)
+        self.assertNotIn("Weather here", body)
         self.assertIn("Lamp", body)
         self.assertIn("Directions", body)
-        self.assertIn("away", body)
-        self.assertIn("Car", body)
-        self.assertIn("Weather here", body)
         # The shop details are sent in the live state payload.
         state = sv.race_state(self.race.id)
         self.assertEqual(state["participants"][0]["shop_name"], "Maple Shop")

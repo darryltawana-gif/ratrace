@@ -170,7 +170,7 @@ class Profile(models.Model):
 
     @property
     def badge_label(self):
-        return {"platinum": "Platinum", "gold": "Gold", "bronze": "Bronze"}.get(self.badge, "New seller")
+        return {"platinum": "Platinum", "gold": "Gold", "bronze": "Bronze"}.get(self.badge, "")
 
     @property
     def hall_of_fame(self):

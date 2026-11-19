@@ -76,7 +76,7 @@
     <div class="shop-section">
       <h3>🏪 Your shop</h3>
       <p class="msg-note" style="margin-top:0">Your shop name and picture are optional. Your shop or business location is
-        required so customers can see where you are and get live distance and directions on the race map.</p>
+        required so customers can see where you are and get directions to your shop.</p>
 
       <label for="{{ form.shop_name.id_for_label }}">{{ form.shop_name.label }}</label>
       {{ form.shop_name }}
@@ -92,7 +92,7 @@
       {{ form.shop_lat }}{{ form.shop_lng }}
       <div class="loc-row">
         <button type="button" class="btn small ghost" id="useShopLocation">📍 Use my current location</button>
-        <span class="muted" style="font-size:.82rem">Pins your shop on the live map.</span>
+        <span class="muted" style="font-size:.82rem">Saves your shop location for directions.</span>
       </div>
       <p id="shopLocStatus" aria-live="polite"></p>
     </div>

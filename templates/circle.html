@@ -1,154 +1,204 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
- .member-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
- .member{display:flex;gap:10px;align-items:center;background:#fff;border:1px solid var(--border);border-radius:14px;padding:12px}
- .member .avatar{width:46px;height:46px}
- .member .who{flex:1;min-width:0}
- .member .who b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
- .member .who > span{font-size:.76rem;color:#5a6a8c}
- .member .review-badges{margin-top:4px}
- .member .review-badge span{font-size:.7rem;color:inherit}
- .member .open{display:flex;gap:10px;align-items:center;flex:1;min-width:0;text-decoration:none;color:inherit}
- .member .rm-btn{padding:7px 12px;font-size:.84rem;white-space:nowrap}
- .topic-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
- @media (max-width:600px){.topic-grid{grid-template-columns:1fr}}
- .topic-btn{display:flex;align-items:center;gap:10px;justify-content:flex-start;text-align:left;background:#f7f9fe;border:1.5px solid #c5d0ea;
-   border-radius:12px;padding:12px 14px;font-weight:700;cursor:pointer;color:#0b1f4b;width:100%;font-size:.95rem}
- .topic-btn:hover{border-color:#d90429;background:#fff5f7}
- .topic-btn .em{font-size:1.25rem}
+ .circle-section{scroll-margin-top:130px}
+ .circle-section + .circle-section{margin-top:26px}
+ .mc-open{display:flex;gap:11px;align-items:center;flex:1;min-width:0;text-decoration:none;color:inherit}
+ .pending-card{background:#fff;border:1px solid var(--border);border-left:4px solid var(--accent);
+   border-radius:16px;padding:14px 16px;box-shadow:var(--shadow-sm);margin:0 0 16px}
+ .pending-card h3{margin:0 0 8px;font-size:1rem}
+ .pending-card .member-card{border:0;box-shadow:none;padding:8px 0}
+ .circle-card{background:#fff;border:1px solid var(--border);border-radius:18px;padding:18px;
+   box-shadow:var(--shadow-sm);margin:0 0 14px}
+ .circle-card .cc-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+ .circle-card .cc-head h3{margin:0;flex:1;min-width:180px;font-size:1.08rem}
+ .circle-owner{background:#f7faff !important;border-color:#c9d8f5 !important}
+ .tabbar .tab-count{background:rgba(37,99,235,.12);color:var(--accent-dark);border-radius:999px;
+   padding:1px 8px;font-size:.72rem;font-weight:900;line-height:1.4}
+ .tabbar a.active .tab-count{background:rgba(255,255,255,.22);color:#ffffff}
+ @media (max-width:620px){
+   .member-card{flex-wrap:wrap}
+   .member-card .mc-actions{flex-direction:row;width:100%;justify-content:flex-end}
+ }
 </style>
 
-<div class="section-head"><h2>🤝 My Circle</h2>
-  {% if mode == 'customer' %}<a class="btn navy" href="{% url 'circle_chat' circle.id %}">💬 Talk to Sellers</a>{% endif %}
+<div class="page-hero">
+  <span class="eyebrow">🤝 Your trusted community</span>
+  <h1>My Circle</h1>
+  <p>
+    {% if mode == 'customer' %}
+    Add sellers you have spoken to and trust. Then talk to all of them at once — every message is seen by the whole Circle.
+    {% else %}
+    The customers who trust you, and the sellers you share a Circle with — all in one calm, clear place.
+    {% endif %}
+  </p>
+  <div class="hero-actions">
+    {% if mode == 'customer' %}
+      <span class="hero-stat"><b>{{ members|length }}</b> trusted seller{{ members|length|pluralize }}</span>
+      {% if pending %}<span class="hero-stat"><b>{{ pending|length }}</b> waiting for an answer</span>{% endif %}
+      <a class="btn green" href="{% url 'circle_chat' circle.id %}">💬 Talk to Sellers</a>
+    {% else %}
+      {% if pending %}<span class="hero-stat"><b>{{ pending|length }}</b> request{{ pending|length|pluralize }} to answer</span>{% endif %}
+      <span class="hero-stat"><b>{{ circles|length }}</b> Circle{{ circles|length|pluralize }}</span>
+    {% endif %}
+  </div>
+</div>
+
+<div class="tabbar" aria-label="My Circle sections">
+  {% if mode == 'customer' %}
+  <a href="#members" class="active">👥 Members <span class="tab-count">{{ members|length }}</span></a>
+  <a href="#talk">💬 Talk to Sellers</a>
+  <a href="#find">➕ Add sellers{% if suggestions %} <span class="tab-count">{{ suggestions|length }}</span>{% endif %}</a>
+  {% else %}
+  <a href="#requests" class="active">🔔 Requests{% if pending %} <span class="tab-count">{{ pending|length }}</span>{% endif %}</a>
+  <a href="#circles">👥 Your Circles <span class="tab-count">{{ circles|length }}</span></a>
+  <a href="#activity">🕒 Recent activities</a>
+  {% endif %}
 </div>
 
 {% if mode == 'customer' %}
-<p class="muted" style="margin-top:-4px">Your Circle is your trusted community. Add sellers you have spoken to and trust, then talk to all of them at once.</p>
-
 {% if pending %}
-<div class="card" style="border-left:6px solid #f2c200">
-  <h3 style="margin-top:0">⏳ Waiting for an answer</h3>
+<div class="pending-card">
+  <h3>⏳ Waiting for an answer</h3>
   {% for m in pending %}
-  <div class="member" style="border:0;padding:8px 0">
+  <div class="member-card">
     {% if m.photo %}<img class="avatar" src="{{ m.photo }}" alt="">{% else %}<div class="avatar ph">{{ m.name|slice:":1"|upper }}</div>{% endif %}
-    <div class="who"><b>{{ m.name }}</b><span>Request sent — waiting for the seller</span>
+    <div class="mc-body"><b>{{ m.name }}</b><span>Request sent — waiting for the seller</span>
       {% include "includes/review_badges.html" with badges=m.review_badges compact=1 limit=1 %}</div>
   </div>
   {% endfor %}
 </div>
 {% endif %}
 
-<div class="section-head"><h2 style="font-size:1.2rem">In your Circle</h2><span class="chip">{{ members|length }}</span></div>
-{% if members %}
-<div class="member-grid">
-  {% for m in members %}
-  <div class="member">
-    <a class="open" href="{% url 'seller_public' m.user.id %}">
-      {% if m.photo %}<img class="avatar" src="{{ m.photo }}" alt="">{% else %}<div class="avatar ph">{{ m.name|slice:":1"|upper }}</div>{% endif %}
-      <div class="who"><b>{{ m.name }}</b><span>{{ m.category|default:"Seller" }}</span>
-        {% include "includes/review_badges.html" with badges=m.review_badges compact=1 limit=1 %}</div>
-    </a>
-    <form method="post" action="{% url 'circle_remove' m.id %}" style="margin:0"
-          onsubmit="return confirm('Remove {{ m.name|escapejs }} from your Circle?')">{% csrf_token %}
-      <button class="btn danger rm-btn" title="Remove from my Circle">Remove</button>
-    </form>
-  </div>
-  {% endfor %}
-</div>
-{% else %}
-<div class="empty">Your Circle is empty. Add sellers from the list below or from their profile page.</div>
-{% endif %}
-
-<div class="card" style="margin-top:18px">
-  <h3 style="margin-top:0">💬 Talk to Sellers</h3>
-  <p class="muted" style="margin-top:0">Pick a topic. Every seller in your Circle gets the message and everyone can reply — all messages are seen by the whole Circle.</p>
-  <div class="topic-grid">
-    {% for key, label in topics %}
-    <form method="post" action="{% url 'circle_talk' circle.id %}">{% csrf_token %}
-      <input type="hidden" name="topic" value="{{ key }}">
-      <button class="topic-btn"><span class="em">{% if key == 'common' %}🎬{% elif key == 'jokes' %}😂{% elif key == 'products' %}🛍{% else %}💬{% endif %}</span>{{ label }}</button>
-    </form>
+<section id="members" class="circle-section">
+  <div class="section-head"><h2>In your Circle</h2><span class="chip">{{ members|length }}</span></div>
+  {% if members %}
+  <div class="member-grid">
+    {% for m in members %}
+    <div class="member-card">
+      <a class="mc-open" href="{% url 'seller_public' m.user.id %}">
+        {% if m.photo %}<img class="avatar" src="{{ m.photo }}" alt="">{% else %}<div class="avatar ph">{{ m.name|slice:":1"|upper }}</div>{% endif %}
+        <div class="mc-body"><b>{{ m.name }}</b><span>{{ m.category|default:"Seller" }}</span>
+          {% include "includes/review_badges.html" with badges=m.review_badges compact=1 limit=1 %}</div>
+      </a>
+      <div class="mc-actions">
+        <a class="btn small navy" href="{% url 'seller_public' m.user.id %}">View shop</a>
+        <form method="post" action="{% url 'circle_remove' m.id %}" style="margin:0"
+              onsubmit="return confirm('Remove {{ m.name|escapejs }} from your Circle?')">{% csrf_token %}
+          <button class="btn small danger" title="Remove from my Circle">Remove</button>
+        </form>
+      </div>
+    </div>
     {% endfor %}
   </div>
-</div>
+  {% else %}
+  <div class="empty">Your Circle is empty. Add sellers from the list below or from their profile page.</div>
+  {% endif %}
+</section>
 
-<div class="section-head"><h2 style="font-size:1.2rem">Add sellers to your Circle</h2></div>
-{% if suggestions %}
-<div class="member-grid">
-  {% for s in suggestions %}
-  <div class="member">
-    {% if s.photo %}<img class="avatar" src="{{ s.photo.url }}" alt="">{% else %}<div class="avatar ph">{{ s.user.username|slice:":1"|upper }}</div>{% endif %}
-    <div class="who"><b>{{ s.user.username }}</b><span>{{ s.category_label|default:"Seller" }}</span>
-      {% include "includes/review_badges.html" with badges=s.review_badges compact=1 limit=1 %}</div>
-    <form method="post" action="{% url 'circle_request' s.user.id %}" style="margin:0">{% csrf_token %}
-      <button class="btn small navy">Add</button></form>
+<section id="talk" class="circle-section">
+  <div class="card" style="margin-top:0">
+    <div class="section-head" style="margin-top:0"><h2>💬 Talk to Sellers</h2></div>
+    <p class="muted" style="margin-top:0">Pick a topic. Every seller in your Circle gets the message and everyone can reply — all messages are seen by the whole Circle.</p>
+    <div class="topic-grid">
+      {% for key, label in topics %}
+      <form method="post" action="{% url 'circle_talk' circle.id %}">{% csrf_token %}
+        <input type="hidden" name="topic" value="{{ key }}">
+        <button class="topic-btn"><span class="em">{% if key == 'common' %}🎬{% elif key == 'jokes' %}😂{% elif key == 'products' %}🛍{% else %}💬{% endif %}</span><span class="tb-text">{{ label }}</span><span class="tb-arrow">→</span></button>
+      </form>
+      {% endfor %}
+    </div>
   </div>
-  {% endfor %}
-</div>
-{% else %}
-<p class="muted">All sellers are already in your Circle.</p>
-{% endif %}
+</section>
+
+<section id="find" class="circle-section">
+  <div class="section-head"><h2>Add sellers to your Circle</h2></div>
+  {% if suggestions %}
+  <div class="member-grid">
+    {% for s in suggestions %}
+    <div class="member-card">
+      {% if s.photo %}<img class="avatar" src="{{ s.photo.url }}" alt="">{% else %}<div class="avatar ph">{{ s.user.username|slice:":1"|upper }}</div>{% endif %}
+      <div class="mc-body"><b>{{ s.user.username }}</b><span>{{ s.category_label|default:"Seller" }}</span>
+        {% include "includes/review_badges.html" with badges=s.review_badges compact=1 limit=1 %}</div>
+      <div class="mc-actions">
+        <form method="post" action="{% url 'circle_request' s.user.id %}" style="margin:0">{% csrf_token %}
+          <button class="btn small accent">Add</button></form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">All sellers are already in your Circle.</p>
+  {% endif %}
+</section>
 
 {% else %}
 {# ---------------- Seller view ---------------- #}
-<p class="muted" style="margin-top:-4px">These are the customers who trust you, and the sellers you share a Circle with.</p>
-
-{% if pending %}
-<div class="card" style="border-left:6px solid #d90429">
-  <h3 style="margin-top:0">🔔 Circle requests</h3>
-  {% for p in pending %}
-  <div class="member" style="border:0;padding:8px 0;flex-wrap:wrap">
-    {% if p.circle.customer.profile.photo %}<img class="avatar" src="{{ p.circle.customer.profile.photo.url }}" alt="">
-    {% else %}<div class="avatar ph">{{ p.circle.customer.username|slice:":1"|upper }}</div>{% endif %}
-    <span class="who"><b>{{ p.circle.customer.username }}</b><span>wants to add you to their Circle</span></span>
-    <form method="post" action="{% url 'circle_respond' p.id 'accept' %}" style="margin:0">{% csrf_token %}
-      <button class="btn small green">Accept</button></form>
-    <form method="post" action="{% url 'circle_respond' p.id 'decline' %}" style="margin:0">{% csrf_token %}
-      <button class="btn small danger">Decline</button></form>
-  </div>
-  {% endfor %}
-</div>
-{% endif %}
-
-{% for c in circles %}
-<div class="card">
-  <div class="row" style="justify-content:space-between">
-    <h3 style="margin:0">👥 {{ c.customer.username }}'s Circle</h3>
-    <a class="btn small navy" href="{% url 'circle_chat' c.id %}">Open group chat</a>
-  </div>
-  <div class="member-grid" style="margin-top:12px">
-    <div class="member" style="border-color:#b9c7e6;background:#f7f9fe">
-      {% if c.customer.profile.photo %}<img class="avatar" src="{{ c.customer.profile.photo.url }}" alt="">
-      {% else %}<div class="avatar ph">{{ c.customer.username|slice:":1"|upper }}</div>{% endif %}
-      <span class="who"><b>{{ c.customer.username }} (Customer)</b><span>Circle owner</span></span>
+<section id="requests" class="circle-section">
+  {% if pending %}
+  <div class="pending-card">
+    <h3>🔔 Circle requests</h3>
+    {% for p in pending %}
+    <div class="member-card" style="flex-wrap:wrap">
+      {% if p.circle.customer.profile.photo %}<img class="avatar" src="{{ p.circle.customer.profile.photo.url }}" alt="">
+      {% else %}<div class="avatar ph">{{ p.circle.customer.username|slice:":1"|upper }}</div>{% endif %}
+      <div class="mc-body"><b>{{ p.circle.customer.username }}</b><span>wants to add you to their Circle</span></div>
+      <div class="mc-actions" style="flex-direction:row">
+        <form method="post" action="{% url 'circle_respond' p.id 'accept' %}" style="margin:0">{% csrf_token %}
+          <button class="btn small green">Accept</button></form>
+        <form method="post" action="{% url 'circle_respond' p.id 'decline' %}" style="margin:0">{% csrf_token %}
+          <button class="btn small danger">Decline</button></form>
+      </div>
     </div>
-    {% for cm in c.accepted_members %}
-    <a class="member" href="{% url 'seller_public' cm.seller.id %}" style="text-decoration:none;color:inherit">
-      {% if cm.seller.profile.photo %}<img class="avatar" src="{{ cm.seller.profile.photo.url }}" alt="">
-      {% else %}<div class="avatar ph">{{ cm.seller.username|slice:":1"|upper }}</div>{% endif %}
-      <div class="who"><b>{{ cm.seller.username }}{% if cm.seller.id == user.id %} (You){% endif %}</b>
-        <span>{{ cm.seller.profile.category_label|default:"Seller" }}</span>
-        {% include "includes/review_badges.html" with badges=cm.seller.profile.review_badges compact=1 limit=1 %}</div>
-    </a>
     {% endfor %}
   </div>
-</div>
-{% empty %}
-<div class="empty">You are not in any Circle yet. When a customer trusts you, their Circle appears here.</div>
-{% endfor %}
+  {% else %}
+  <div class="empty">No Circle requests right now. When a customer trusts you, their request appears here.</div>
+  {% endif %}
+</section>
 
-<div class="section-head"><h2 style="font-size:1.2rem">🕒 Recent activities</h2></div>
-<div class="card">
-  {% for r in deals %}
-  <div class="review-line">
-    <div class="avatar ph">✔</div>
-    <div class="rv"><b>{{ r.customer.username }} → {{ r.winner.display_name }}</b>
-      <div class="muted" style="font-size:.86rem">“{{ r.product }}” · {{ r.started_at|date:"d M Y" }}</div></div>
+<section id="circles" class="circle-section">
+  {% for c in circles %}
+  <div class="circle-card">
+    <div class="cc-head">
+      <h3>👥 {{ c.customer.username }}'s Circle</h3>
+      <a class="btn small navy" href="{% url 'circle_chat' c.id %}">Open group chat</a>
+    </div>
+    <div class="member-grid" style="margin-top:12px">
+      <div class="member-card circle-owner">
+        {% if c.customer.profile.photo %}<img class="avatar" src="{{ c.customer.profile.photo.url }}" alt="">
+        {% else %}<div class="avatar ph">{{ c.customer.username|slice:":1"|upper }}</div>{% endif %}
+        <div class="mc-body"><b>{{ c.customer.username }} (Customer)</b><span>Circle owner</span></div>
+      </div>
+      {% for cm in c.accepted_members %}
+      <a class="member-card" href="{% url 'seller_public' cm.seller.id %}" style="text-decoration:none;color:inherit">
+        {% if cm.seller.profile.photo %}<img class="avatar" src="{{ cm.seller.profile.photo.url }}" alt="">
+        {% else %}<div class="avatar ph">{{ cm.seller.username|slice:":1"|upper }}</div>{% endif %}
+        <div class="mc-body"><b>{{ cm.seller.username }}{% if cm.seller.id == user.id %} (You){% endif %}</b>
+          <span>{{ cm.seller.profile.category_label|default:"Seller" }}</span>
+          {% include "includes/review_badges.html" with badges=cm.seller.profile.review_badges compact=1 limit=1 %}</div>
+      </a>
+      {% endfor %}
+    </div>
   </div>
   {% empty %}
-  <p class="muted" style="margin:0">No completed deals yet.</p>
+  <div class="empty">You are not in any Circle yet. When a customer trusts you, their Circle appears here.</div>
   {% endfor %}
-</div>
+</section>
+
+<section id="activity" class="circle-section">
+  <div class="section-head"><h2>🕒 Recent activities</h2></div>
+  <div class="card" style="margin-top:0">
+    {% for r in deals %}
+    <div class="comment-item">
+      <div class="avatar ph">✔</div>
+      <div class="ci-body"><b>{{ r.customer.username }} → {{ r.winner.display_name }}</b>
+        <div class="when">“{{ r.product }}” · {{ r.started_at|date:"d M Y" }}</div></div>
+    </div>
+    {% empty %}
+    <p class="muted" style="margin:0">No completed deals yet.</p>
+    {% endfor %}
+  </div>
+</section>
 {% endif %}
 {% endblock %}
